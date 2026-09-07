@@ -76,14 +76,14 @@ class Camera {
 G.Camera = Camera;
 
 /* ---------------- Board projection (3/4 perspective) ----------------
-   6 rows x 10 cols. Row 0 = far (small), row 5 = near (large).      */
+   4 rows x 10 cols. Row 0 = far (small), row 3 = near (large).      */
 const Board = {
-  ROWS: 6, COLS: 10,
+  ROWS: 4, COLS: 10,
   centerX: 640,
-  // 6x10 board, 3/4 perspective: lane gaps compress toward the horizon.
+  // 4x10 board, 3/4 perspective: lane gaps compress toward the horizon.
   // Narrow width fan so the silhouette reads as parallel corridors, not stairs.
-  laneY: [159, 234, 314, 398, 486, 578],
-  rowScale: [0.80, 0.85, 0.90, 0.95, 1.00, 1.06],
+  laneY: [200, 308, 432, 575],
+  rowScale: [0.80, 0.89, 0.97, 1.06],
   colW: 88,
   pultU: 0.0,                   // pult sits ON the leftmost square of its lane
   pxPerHeight: 38,              // pixels per height-unit at scale 1

@@ -438,25 +438,68 @@
     x.moveTo(edgeL(fanTop), fanTop); x.lineTo(edgeR(fanTop), fanTop);
     x.lineTo(edgeR(fanBot), fanBot); x.lineTo(edgeL(fanBot), fanBot);
     x.closePath(); x.fill();
-    // converging column boundary lines — the loudest board element
-    x.strokeStyle = 'rgba(25,52,18,0.55)';
-    x.lineWidth = 3;
-    for (let c = 0; c <= Board.COLS; c++) {
-      const u = c - 0.5;
+    // x on the plane at height y for column-unit u (matches Board.colX endpoints)
+    const xAt = (y, u) => Board.centerX + (u - 4.5) * Board.colW * sAt(y);
+    // 10 subtle alternating column strips (mowing-stripe look): makes each of the
+    // 10 columns a discrete tile you can count, without adding visible noise.
+    for (let c = 0; c < Board.COLS; c++) {
+      x.fillStyle = c % 2 === 0 ? 'rgba(255,255,238,0.055)' : 'rgba(14,34,8,0.05)';
       x.beginPath();
-      x.moveTo(Board.colX(0, u), fanTop);
-      x.lineTo(Board.colX(Board.ROWS - 1, u), fanBot);
-      x.stroke();
+      x.moveTo(xAt(fanTop, c - 0.5), fanTop);
+      x.lineTo(xAt(fanTop, c + 0.5), fanTop);
+      x.lineTo(xAt(fanBot, c + 0.5), fanBot);
+      x.lineTo(xAt(fanBot, c - 0.5), fanBot);
+      x.closePath(); x.fill();
     }
-    // lane gutters — continuous across the plane at each lane boundary
-    const bounds = [fanTop];
-    for (let r = 0; r < Board.ROWS - 1; r++) bounds.push((Board.laneY[r] + Board.laneY[r + 1]) / 2);
-    bounds.push(fanBot);
-    for (const by of bounds) {
-      x.strokeStyle = 'rgba(25,50,18,0.5)';
-      x.lineWidth = 2.5;
+    // row band edges (y), shared by dividers and gutters
+    const bandY = [fanTop];
+    for (let r = 0; r < Board.ROWS - 1; r++) bandY.push((Board.laneY[r] + Board.laneY[r + 1]) / 2);
+    bandY.push(fanBot);
+    const taper = s => (s - Board.rowScale[0]) / (Board.rowScale[Board.ROWS - 1] - Board.rowScale[0]); // 0 far .. 1 near
+    // converging column dividers — carved furrows (dark core + sun-side light lip),
+    // drawn per row band so width/intensity taper with row scale. Same straight
+    // fan geometry as before (xAt endpoints), just re-stroked legibly.
+    for (let r = 0; r < Board.ROWS; r++) {
+      const k = taper(Board.rowScale[r]);
+      const w = 1.2 + 1.2 * k;    // 1.2px far .. 2.4px near
+      const a = 0.62 + 0.22 * k;  // 0.62 far .. 0.84 near
+      const y0 = bandY[r], y1 = bandY[r + 1];
+      x.lineCap = 'butt';
+      for (let c = 0; c <= Board.COLS; c++) {
+        const rail = (c === 0 || c === Board.COLS); // outer rails frame the 10 tiles
+        x.lineWidth = rail ? w * 1.3 : w;
+        x.strokeStyle = `rgba(24,44,14,${(rail ? a + 0.06 : a).toFixed(3)})`;
+        x.beginPath();
+        x.moveTo(xAt(y0, c - 0.5), y0);
+        x.lineTo(xAt(y1, c - 0.5), y1);
+        x.stroke();
+      }
+      // light lip on the sun side of each interior furrow -> crisp edge vs grass
+      x.lineWidth = Math.max(0.8, w * 0.5);
+      x.strokeStyle = `rgba(228,242,200,${(0.18 + 0.14 * k).toFixed(3)})`;
+      for (let c = 1; c < Board.COLS; c++) {
+        const dx = w * 0.9;
+        x.beginPath();
+        x.moveTo(xAt(y0, c - 0.5) + dx, y0);
+        x.lineTo(xAt(y1, c - 0.5) + dx, y1);
+        x.stroke();
+      }
+    }
+    // lane gutters — loudest lines on the plane: lanes stay primary over columns
+    for (let i = 0; i < bandY.length; i++) {
+      const by = bandY[i];
+      const k = taper(sAt(by));
+      const w = 3.0 + 1.0 * k;    // 3.0px far .. 4.0px near
+      x.lineWidth = w;
+      x.strokeStyle = `rgba(20,42,12,${(0.70 + 0.14 * k).toFixed(3)})`; // 0.70 .. 0.84
       x.beginPath();
       x.moveTo(edgeL(by), by); x.lineTo(edgeR(by), by);
+      x.stroke();
+      // lit lower lip of the furrow
+      x.lineWidth = Math.max(1, w * 0.45);
+      x.strokeStyle = `rgba(228,242,200,${(0.14 + 0.14 * k).toFixed(3)})`;
+      x.beginPath();
+      x.moveTo(edgeL(by), by + w * 0.8); x.lineTo(edgeR(by), by + w * 0.8);
       x.stroke();
     }
     // foreground strip under the board (kept slim — near lanes dominate)

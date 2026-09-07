@@ -311,8 +311,8 @@
   /* ================= Pult ================= */
   class Pult {
     constructor() {
-      this.row = 3;
-      this.jumpT = 1; this.jumpFrom = 3; this.jumpTo = 3;
+      this.row = 2; // lower-middle of 4 lanes
+      this.jumpT = 1; this.jumpFrom = 2; this.jumpTo = 2;
       this.charge = 0; this.charging = false;
       this.chargeUp = true;
       this.recoil = 0;
