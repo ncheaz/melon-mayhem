@@ -14,6 +14,13 @@
   // (colX(r,0) ranges 323..220 across rows 0..3, so 222 hugs the field edge).
   const PULT_RAIL_X = 222;
 
+  // HIGH ARC threshold, in units of apex HEIGHT: ANY hit delivered from an
+  // arc that crests at/above this counts as TWO hits (every damage popup from
+  // that shot gets ' x2'). Half the apex ceiling (Board.maxApexH = 10),
+  // ≈ 2.9× a tombstone's top (1.75u). Game.highArcH() exposes it; Projectile
+  // keys its highArc flag off it — single source of truth.
+  const HIGH_ARC_H = 5.0;
+
   // Pult-only depth cue: mild extra scale response by lane, stacked on top of
   // Board.scale() for the pult sprite, its shadow and rail dust FX ONLY.
   // 0.92 (far row 0) → 1.08 (near row 3). Board.rowScale/laneY untouched.
@@ -102,7 +109,10 @@
       this.vu = sc.vu;
       this.vh = sc.vh;
       this.launchDeg = sc.deg;
-      this.plunge = !opts.heavy && opts.force > 0.607; // ≥ ~57° plunges
+      // HIGH ARC rule (replaces the old force>0.607 'plunge' key): a shot is
+      // x2 when its arc APEX clears HIGH_ARC_H — apex height is the skill
+      // lever, so the same charge reads x2 up close but not aimed far.
+      this.highArc = !opts.heavy && sc.H >= HIGH_ARC_H;
       this.heavy = !!opts.heavy;
       this.hitsDone = 0;
       this.spin = 0;
@@ -183,7 +193,7 @@
           const radius = this.hitsDone === 0 ? 0.58 : 0.72;
           if (this.h < zone && Math.abs(z.u - this.u) < radius) {
             game.resolveImpact(this, z);
-            if (this.hitsDone >= 2 || (!this.plunge && !this.heavy && this.hitsDone >= 1)) {
+            if (this.hitsDone >= 2 || (!this.highArc && !this.heavy && this.hitsDone >= 1)) {
               // regular shot: done after first direct contact (splash handled on ground)
               if (!this.heavy) { game.groundSplash(this); this.dead = true; }
             }
@@ -237,7 +247,7 @@
       ctx.save();
       ctx.translate(sx, sy);
       ctx.scale(s * m, s * m);
-      G.Sprites.drawMelon(ctx, this.heavy ? 17 : 15, this.plunge ? 0.5 + 0.3 * Math.sin(this.launchT * 20) : 0, this.heavy, this.spin);
+      G.Sprites.drawMelon(ctx, this.heavy ? 17 : 15, this.highArc ? 0.5 + 0.3 * Math.sin(this.launchT * 20) : 0, this.heavy, this.spin);
       ctx.restore();
     }
   }
@@ -739,7 +749,17 @@
       const r = this.pult.row;
       return clamp(B.toU(r, this.input.mx), B.pultU + 1.2, 11);
     }
-    plungeThresholdF() { return 0.607; } // launch angle ≥ ~57° plunges over shields
+    // Apex-height threshold for the x2 rule (see HIGH_ARC_H).
+    highArcH() { return HIGH_ARC_H; }
+    // Minimal charge (0..1) whose apex reaches highArcH() at aimed distance d.
+    // Inverting shotCalc's unclamped H = ½·d·tan(30° + 45°·f):
+    //   fNeeded = (atan(2·H_t / d)·180/π − 30) / 45
+    // Returns null when even a full bar (75°) falls short — hide the marker.
+    highArcChargeFor(d) {
+      const degNeeded = Math.atan(2 * HIGH_ARC_H / Math.max(0.8, d)) * 180 / Math.PI;
+      const f = (degNeeded - 30) / 45;
+      return f > 1 ? null : clamp(f, 0, 1);
+    }
     // Screen-space position of the melon exactly as G.Sprites.drawPult paints
     // the held/scoop melon for a given pose. Mirrors the sprite transform
     // chain: arm-local melon (58,−6) → arm rotate a=armAng−recoil·0.55 →
@@ -797,8 +817,8 @@
       this.lastDirectZombie = z;
       // a kneeling zombie dies to ANY hit — glory kill
       if (z.state === 'kneel' && !pr.heavy) {
-        this.killZombie(z, 'glory');
-        if (!pr.plunge || pr.hitsDone >= 2) { this.groundSplash(pr); pr.dead = true; }
+        this.killZombie(z, 'glory', pr.highArc);
+        if (!pr.highArc || pr.hitsDone >= 2) { this.groundSplash(pr); pr.dead = true; }
         return;
       }
       const B = G.Board;
@@ -824,10 +844,10 @@
         pr.dead = true;
         return;
       }
-      if (pr.hitsDone === 1 && pr.plunge) {
-        // PLUNGE: over the shield, straight down on the head — armor piece #1 evaded
-        if (z.shield) { z.shield = false; this.shieldBreakFX(z, true); }
-        this.headHit(z, sx, true);
+      if (pr.hitsDone === 1 && pr.highArc) {
+        // HIGH ARC: over the shield, straight down on the head — armor piece #1 evaded
+        if (z.shield) { z.shield = false; this.shieldBreakFX(z, true, true); }
+        this.headHit(z, sx, true, true);
         // bounce into splash second hit
         pr.h = Math.max(pr.h, 0.9);
         pr.vh = 2.2; pr.vu = pr.vu * 0.45;
@@ -842,16 +862,15 @@
         G.Audio.shieldClink();
         this.sparks(sx - 14, syTop, 12);
         this.camera.kick(2);
-        if (z.shieldHits <= 0) { this.shieldBreakFX(z, false); }
+        if (z.shieldHits <= 0) { this.shieldBreakFX(z, false, pr.highArc); }
         this.addPopup(sx, syTop - 18, `SHIELD ${Math.max(0, z.shieldHits)}/5`, '#ffd23f', 17);
       } else {
-        const label = (pr.plunge && pr.hitsDone >= 2) ? '-1 x2' : '-1';
-        this.bodyHit(z, sx, syTop, label);
+        this.bodyHit(z, sx, syTop, '-1', pr.highArc && pr.hitsDone >= 2);
       }
       this.groundSplash(pr);
       pr.dead = true;
     }
-    headHit(z, sx, plunging) {
+    headHit(z, sx, plunging, fromHighArc = false) {
       const B = G.Board;
       const hy = B.laneY[z.row] - B.heightPx(z.row, 2.4) * 1;
       if (z.helmet) {
@@ -862,7 +881,7 @@
         G.Audio.helmetClank();
         this.sparks(sx, hy - 30, 8);
         this.debris(sx, hy - 30, '#9aa3ad', 7);
-        this.addPopup(sx, hy - 44, 'HELMET OFF -1', '#ff9e3d', 20);
+        this.addPopup(sx, hy - 44, fromHighArc ? 'HELMET OFF -1 x2' : 'HELMET OFF -1', '#ff9e3d', 20);
         this.camera.kick(3);
         this.hitstop = 0.04;
       } else {
@@ -874,16 +893,16 @@
         G.Audio.headBonk();
         G.Audio.knockdown();
         this.bloodBurst(sx, hy, 10);
-        this.addPopup(sx, hy - 40, '-1 HEAD', '#ff9e3d', 20);
+        this.addPopup(sx, hy - 40, fromHighArc ? '-1 HEAD x2' : '-1 HEAD', '#ff9e3d', 20);
         this.addPopup(sx + 4, hy - 66, 'GLORY!', '#b9ff2e', 22);
         this.camera.kick(5);
         this.hitstop = 0.05;
       }
       this.registerHit();
     }
-    bodyHit(z, sx, sy, label = '-1') {
+    bodyHit(z, sx, sy, label = '-1', fromHighArc = false) {
       if (z.shield) { // splash/body hit drops the shield outright
-        this.shieldBreakFX(z, true);
+        this.shieldBreakFX(z, true, fromHighArc);
       }
       if (z.helmet) {
         z.bodyJostle++;
@@ -892,19 +911,19 @@
           z.helmet = false;
           G.Audio.helmetClank();
           this.debris(sx, sy - 24, '#9aa3ad', 6);
-          this.addPopup(sx, sy - 40, 'HELMET OFF', '#ffd23f', 16);
+          this.addPopup(sx, sy - 40, fromHighArc ? 'HELMET OFF x2' : 'HELMET OFF', '#ffd23f', 16);
         }
       }
       z.hp--;
       z.hitFlash = 0.55;
       G.Audio.splat();
       this.bloodBurst(sx, sy - 6, 12);
-      this.addPopup(sx, sy - 34, label, '#ff5555', 20);
+      this.addPopup(sx, sy - 34, fromHighArc ? `${label} x2` : label, '#ff5555', 20);
       this.camera.kick(2.5);
       this.registerHit();
-      if (z.hp <= 0) this.killZombie(z, 'normal');
+      if (z.hp <= 0) this.killZombie(z, 'normal', fromHighArc);
     }
-    shieldBreakFX(z, silentSplash) {
+    shieldBreakFX(z, silentSplash, fromHighArc = false) {
       z.shield = false;
       z.shieldHits = 0;
       const B = G.Board;
@@ -913,10 +932,10 @@
       G.Audio.shieldBreak();
       this.debris(sx, sy, '#8a6a3c', 10);
       this.sparks(sx, sy, 6);
-      this.addPopup(sx, sy - 24, 'SHIELD DOWN', '#ffd23f', 18);
+      this.addPopup(sx, sy - 24, fromHighArc ? 'SHIELD DOWN x2' : 'SHIELD DOWN', '#ffd23f', 18);
       this.camera.kick(3);
     }
-    killZombie(z, how) {
+    killZombie(z, how, fromHighArc = false) {
       if (z.state === 'die' || z.state === 'glorydie') return;
       const B = G.Board;
       const sx = B.colX(z.row, z.u);
@@ -933,7 +952,7 @@
         this.camera.hitFlash(0.2, '#eaffb0');
         G.Audio.glorySting();
         G.Audio.deathGroan();
-        this.addPopup(sx, sy - 50, 'GLORY KILL!', '#b9ff2e', 34);
+        this.addPopup(sx, sy - 50, fromHighArc ? 'GLORY KILL! x2' : 'GLORY KILL!', '#b9ff2e', 34);
         this.addPopup(sx, sy - 20, '+1 IRON', '#86b1ff', 22);
         // ammo icon flies to HUD
         this.particles.push(new Particle({
@@ -947,7 +966,7 @@
         this.score += Math.floor(100 * this.multiplier());
         G.Audio.deathGroan();
         this.bloodBurst(sx, sy, 14);
-        this.addPopup(sx, sy - 40, 'DOWN', '#e8e8e8', 18);
+        this.addPopup(sx, sy - 40, fromHighArc ? 'DOWN x2' : 'DOWN', '#e8e8e8', 18);
         this.stageStats.kills++;
         this.registerHit();
       }
@@ -982,11 +1001,11 @@
         if (z.row !== pr.row || z.dead || z.state === 'die' || z.state === 'glorydie') continue;
         if (Math.abs(z.u - pr.u) < 0.85 && z !== this.lastDirectZombie) {
           any = true;
-          if (z.state === 'kneel') { this.killZombie(z, 'glory'); }
+          if (z.state === 'kneel') { this.killZombie(z, 'glory', pr.highArc); }
           else {
             const sx = B.colX(z.row, z.u);
             const sy = B.laneY[z.row] - 40 * B.scale(z.row);
-            this.bodyHit(z, sx, sy);
+            this.bodyHit(z, sx, sy, '-1', pr.highArc);
           }
         }
       }
@@ -1239,9 +1258,9 @@
         const d = Math.max(0.8, apexU - B.pultU);
         const sc = G.shotCalc(d, p.charge, false);
         const tApex = sc.tApex, vu = sc.vu, vh = sc.vh;
-        const plunge = p.charge > 0.607;
+        const highArc = sc.H >= this.highArcH();
         ctx.save();
-        ctx.strokeStyle = plunge ? 'rgba(185,255,46,0.85)' : 'rgba(255,255,255,0.55)';
+        ctx.strokeStyle = highArc ? 'rgba(185,255,46,0.85)' : 'rgba(255,255,255,0.55)';
         ctx.lineWidth = 2.5;
         ctx.setLineDash([4, 9]);
         ctx.beginPath();
@@ -1269,7 +1288,7 @@
         const onRail = apexY <= RAIL_AT_Y;
         ctx.save();
         ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = plunge ? '#b9ff2e' : '#ffffff';
+        ctx.strokeStyle = highArc ? '#b9ff2e' : '#ffffff';
         ctx.lineWidth = 2.5;
         if (onRail) {
           // up-chevron on the rail
@@ -1293,11 +1312,11 @@
         }
         ctx.restore();
         ctx.restore();
-        if (plunge) {
+        if (highArc) {
           // smooth pulse, no strobe
           ctx.save();
           ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() / 130);
-          G.outlinedText(ctx, 'PLUNGE x2', apexX, onRail ? APEX_RAIL_Y - 16 : apexY - 22, 16, '#b9ff2e');
+          G.outlinedText(ctx, 'HIGH ARC x2', apexX, onRail ? APEX_RAIL_Y - 16 : apexY - 22, 16, '#b9ff2e');
           ctx.restore();
         }
       } else if (p.jumpT >= 1) {
@@ -1372,13 +1391,16 @@
           ? `rgb(255,${Math.round(233 + 22 * tg)},${Math.round(160 + 95 * tg)})`
           : '#ffe9a0';
         G.outlinedText(ctx, `${Math.round(30 + p.charge * 45)}°`, bx + bw / 2, by + bh + 16, 15, degCol);
-        // plunge threshold marker
-        const fNeeded = this.plungeThresholdF();
-        if (fNeeded > 0 && fNeeded < 1) {
+        // HIGH ARC marker — positioned for the CURRENT aim: the minimal
+        // charge whose apex clears highArcH() at the aimed distance. H grows
+        // with both distance and charge, so the line slides as you aim;
+        // hidden when even a full bar can't reach the threshold.
+        const fNeeded = this.highArcChargeFor(Math.max(0.8, this.apexUFromMouse() - B.pultU));
+        if (fNeeded != null) {
           const myy = by + bh - bh * fNeeded;
           ctx.strokeStyle = '#b9ff2e'; ctx.lineWidth = 3;
           ctx.beginPath(); ctx.moveTo(bx - 8, myy); ctx.lineTo(bx + bw + 8, myy); ctx.stroke();
-          G.outlinedText(ctx, 'PLUNGE', bx + bw + 12, myy, 12, '#b9ff2e', 'left');
+          G.outlinedText(ctx, 'HIGH ARC', bx + bw + 12, myy, 12, '#b9ff2e', 'left');
         }
         ctx.restore();
       }
