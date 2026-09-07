@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Melon Mayhem — Live Build Progress</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1410;
+    color: #d8e8d0;
+    font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+    padding: 32px;
+    max-width: 1060px;
+    margin: 0 auto;
+  }
+  h1 { color: #8ee05c; font-size: 34px; letter-spacing: 1px; text-shadow: 0 3px 0 #1a2a10; }
+  .sub { color: #9fd6a8; margin: 6px 0 22px; }
+  .live { color: #ffd23f; font-size: 13px; letter-spacing: 2px; }
+  .live::before { content: '●'; margin-right: 8px; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  h2 { color: #ffe9a0; margin: 26px 0 10px; font-size: 20px; border-bottom: 2px solid #243820; padding-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #1e2c1a; font-size: 14px; }
+  th { color: #9fd6a8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .done { color: #8ee05c; font-weight: bold; }
+  .wip { color: #ffd23f; font-weight: bold; }
+  .todo { color: #6a7f66; font-weight: bold; }
+  .card {
+    background: #131f14; border: 1px solid #243820; border-radius: 10px;
+    padding: 14px 18px; margin: 12px 0;
+  }
+  .card.bad { border-left: 5px solid #ff5555; }
+  .card.good { border-left: 5px solid #8ee05c; }
+  .card h3 { color: #e8e8e8; font-size: 15px; margin-bottom: 6px; }
+  .verdict { display: inline-block; padding: 2px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; letter-spacing: 1px; }
+  .verdict.lose { background: #3a1414; color: #ff8080; }
+  .verdict.win { background: #1c3314; color: #a8f06a; }
+  a { color: #8ee05c; }
+  code { background: #1a2a1c; padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+  .note { color: #b8ccb0; font-size: 13px; line-height: 1.5; }
+  ul { margin: 8px 0 8px 22px; }
+  li { margin: 4px 0; font-size: 14px; }
+</style>
+<meta http-equiv="refresh" content="15">
+</head>
+<body>
+  <div class="live">LIVE PROGRESS — UPDATED AS THE BUILD EVOLVES</div>
+  <h1>🍈 MELON MAYHEM — Garden Artillery Defense</h1>
+  <div class="sub">PvZ-style artillery gauntlet · builder/critic loops · bar: the spec's roof-level feel, judged on real gameplay screenshots</div>
+
+  <div class="card">
+    <h3>▶ Play the current build</h3>
+    <div class="note">Serve the folder and open <code>index.html</code> — or run: <code>python3 -m http.server 8080</code> then open <code>http://localhost:8080</code>.<br>
+    Controls: hold <b>LMB</b> to charge (bar cycles back when overfilled), release to lob · <b>Mouse X</b> sets the arc midpoint · steep arc = <b>PLUNGE x2</b> over the shield · <b>RMB</b> heavy iron shell (one-hit kill, ignores armor) · <b>W/S</b> lane jumps · <b>P</b> pause · <b>M</b> mute · <b>R</b> restart.</div>
+  </div>
+
+  <h2>Piece status — smallest judgeable pieces</h2>
+  <table>
+    <tr><th>Piece</th><th>Status</th><th>Notes</th></tr>
+    <tr><td>Board perspective (6×10, 3/4)</td><td class="done">BUILD 2</td><td>Symmetric perspective bands, far rows scaled 0.60→1.06, board centered on canvas</td></tr>
+    <tr><td>Launch angles 30°–75°</td><td class="done">BUILD 2</td><td>Force maps to elevation; H = ½·d·tanθ; live angle readout on force bar</td></tr>
+    <tr><td>Pult left-column lock</td><td class="done">BUILD 2</td><td>Pult rides the leftmost square of every lane (u=0 column)</td></tr>
+    <tr><td>Throw arc &amp; feel</td><td class="done">BUILD 1</td><td>Real ballistic integration: gravity, apex at mouse X, dotted preview</td></tr>
+    <tr><td>Force bar</td><td class="done">BUILD 1</td><td>Cycles to weak on overfill, plunge-threshold marker for current aim</td></tr>
+    <tr><td>Pult lane jumps</td><td class="done">BUILD 1</td><td>W/S hop with squash/stretch, dust, whoosh, aim-locked during hop</td></tr>
+    <tr><td>Zombie movement &amp; animation</td><td class="done">BUILD 1</td><td>Hold ~3s per square → quick dash; walk/breathe/groan cycles; 5 types</td></tr>
+    <tr><td>Armor economy</td><td class="done">BUILD 1</td><td>5 shield hits / 1 body hit drops shield · 2 body / 1 head drops helmet · 5 body kills</td></tr>
+    <tr><td>Hit feedback &amp; popups</td><td class="done">BUILD 1</td><td>Sparks on armor, blood on flesh, value popups, x2 on plunge, MISS feedback</td></tr>
+    <tr><td>Glory kill</td><td class="done">BUILD 1</td><td>Head-hit kneel 3s → any hit = glory cine, slow-mo, +1 iron, unique indicator</td></tr>
+    <tr><td>Heavy munitions</td><td class="done">BUILD 1</td><td>RMB iron shell, pierces crowds, smashes tombstones</td></tr>
+    <tr><td>Waves / stages / obstacles</td><td class="done">BUILD 1</td><td>4 waves/stage, scaling type mix, tombstones force arc choices</td></tr>
+    <tr><td>Win/lose flow</td><td class="done">BUILD 1</td><td>Brain-eaten + pult-destroyed cinematics, stage clears, high score</td></tr>
+    <tr><td>Audio</td><td class="done">BUILD 1</td><td>Fully synthesized: marching, groans, shots, clinks, splats, stings</td></tr>
+    <tr><td>Juice / game feel</td><td class="done">BUILD 1</td><td>Screenshake, hitstop, slow-mo, flashes, danger vignette</td></tr>
+    <tr><td>Critic loop</td><td class="wip">ROUND 1 PENDING</td><td>Fresh-context harsh critic on real screenshots</td></tr>
+  </table>
+
+  <h2>Critic verdicts (fresh context each round)</h2>
+  <div class="card good">
+    <h3><span class="verdict win">WIN</span> Round 4 — critic picks ours</h3>
+    <div class="note"><b>VERDICT: YES — it beats the bar now.</b> Scorecard: grid <b>9</b> · arc <b>9</b> · feedback <b>9</b> · readability <b>8</b> · polish <b>7</b> · FPS <b>10</b>. "The round-3 blocker (stacked slabs) is genuinely dead." Remaining polish items (heavy-decal differentiation, reticle remnant, decal fade, caption orphan) were fixed in the finishing pass.</div>
+  </div>
+  <div class="card bad">
+    <h3><span class="verdict lose">LOSE</span> Round 3 — grid 6, arc 8, feedback 8, readability 7, polish 7</h3>
+    <div class="note">"Six stacked slabs, not one receding plane." Found a real bug too: <code>startJump</code> clamped rows to 0–3 (stale 4-lane hardcode) — rows 4–5 unreachable with a phantom hop that ate your charge. <b>Fixed:</b> lawn rebuilt as one continuous trapezoid fan with 11 converging column lines; stale clamp removed (verified rows 0–5 reachable, no phantom hop); in-field MISS bolded; reticle moved to the apex; fence raised; craters 10s + far-lane minimum size.</div>
+  </div>
+  <div class="card bad">
+    <h3><span class="verdict lose">LOSE</span> Round 2 — grid 6, arc 7, feedback 7, readability 6, polish 7</h3>
+    <div class="note">"The board is a pyramid before it is a grid." <b>Fixed:</b> per-row tint alternation deleted, column borders made loudest (3px/55%), width fan narrowed 0.64–1.06 → 0.80–1.06, aim preview truncated at apex, OVERLOAD flash honest, +1 IRON recolored, ammo pips labeled ×N.</div>
+  </div>
+  <div class="card bad">
+    <h3><span class="verdict lose">LOSE</span> Round 1 — grid 4, arc 8, feedback 9, readability 5, polish 5</h3>
+    <div class="note">"The playfield fails its one job: it doesn't read as a 6×10 tactical lane grid." <b>Fixed:</b> board moved down (near lanes dominate), stronger checker, thin gutters, sun clear of HUD, tip off the fence, labeled ammo, stale comment cleaned.</div>
+  </div>
+
+  <h2>Finishing pass (post-win polish)</h2>
+  <div class="note">
+    <ul>
+      <li><b>Heavy iron shells leave their own mark:</b> 1.6× crater with raised dirt rim and embedded steel shrapnel, 20s TTL — the field remembers an iron hit differently than fruit juice.</li>
+      <li>Evicted craters fade out over 0.5s instead of popping.</li>
+      <li>Idle mouse reticle removed (mouse X reads through the charge UI alone).</li>
+      <li>PLUNGE x2 smooth sine pulse instead of a 5.5Hz strobe.</li>
+      <li>Sun raised clear of the fence; caption fits one line.</li>
+    </ul>
+  </div>
+
+  <h2>Build 2 — user-feedback fixes (verified in-browser)</h2>
+  <div class="note">
+    <ul>
+      <li><b>6×10 board, symmetric:</b> lane bands are now symmetric about their lane lines with perspective-compressed gaps (61→92px), whole lawn centered vertically on the canvas; per-row scale 0.60→1.06.</li>
+      <li><b>Pult left-column lock:</b> pult now rides <em>on</em> the leftmost square of every lane — verified numerically (<code>x == colX(row, 0)</code> for all 6 lanes: 331/367/402px…, perspective-correct drift only).</li>
+      <li><b>Launch angles 30°–75°:</b> force now maps to elevation angle; apex height derives from angle × distance (<code>H = ½·d·tanθ</code>). Verified: full charge = 73–75°, apex lands exactly at the aimed column, arc clears the fence line on screen. Live angle readout + plunge marker on the force bar.</li>
+      <li><b>Bug fixes found while verifying:</b> pult was updating twice per frame (charge cycled at 2× speed — full in 0.43s instead of 0.85s); stale pause state survived restarts.</li>
+    </ul>
+  </div>
+
+  <h2>Asset &amp; bar disclosure</h2>
+  <div class="note">
+    <ul>
+      <li><b>Art &amp; sound are 100% original</b> — procedurally drawn vector sprites and Web-Audio-synthesized SFX. The spec asks for real PvZ sprites from spriters-resource.com and real roof-level footage as the comparison bar; those are PopCap/EA copyrighted assets and can't be downloaded or captured here. The style, mechanics and feel targets are followed with original assets instead — swap-in of licensed art is trivial since every sprite is a draw function.</li>
+      <li><b>The bar</b> is therefore the spec's own concrete criteria (arc physics legibility, armor economy depth, feedback density, 60 FPS, PopCap-style chunky juice), judged blind on screenshots of real gameplay by a critic that didn't build it.</li>
+    </ul>
+  </div>
+</body>
+</html>
