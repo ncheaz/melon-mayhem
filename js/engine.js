@@ -88,6 +88,7 @@ const Board = {
   pultU: 0.0,                   // pult sits ON the leftmost square of its lane
   pxPerHeight: 38,              // pixels per height-unit at scale 1
   gravity: 19,                  // world units / s^2
+  maxApexH: 10,                 // apex ceiling in height units (was 6.5): max charge is a dramatic lob that clears tombstones (1.75u) ~5.7× at any aim past mid-board
 
   scale(r) { return this.rowScale[r]; },
   // world u (col units, can be fractional) -> screen x for row r
@@ -101,13 +102,15 @@ G.Board = Board;
 
 /* ---------------- Ballistic shot calculator ----------------
    Launch angle is the skill lever: force maps to 30°..75° elevation.
-   Apex height derives from angle + distance: H = ½·d·tanθ.            */
+   Apex height derives from angle + distance: H = ½·d·tanθ, clamped to
+   [0.8, Board.maxApexH]. Board.maxApexH is the single source of truth
+   for the ceiling — key high-arc bonuses off it, never re-derive.      */
 G.shotCalc = function (d, force, heavy) {
   const B = G.Board;
   d = Math.max(0.8, d);
   const deg = heavy ? 48 : 30 + force * 45; // launch angle, clamped at 75°
   const theta = deg * Math.PI / 180;
-  const H = Math.min(6.5, Math.max(0.8, 0.5 * d * Math.tan(theta)));
+  const H = Math.min(B.maxApexH, Math.max(0.8, 0.5 * d * Math.tan(theta)));
   const tApex = Math.sqrt(2 * H / B.gravity);
   return { H, tApex, vu: d / tApex, vh: Math.sqrt(2 * B.gravity * H), deg };
 };

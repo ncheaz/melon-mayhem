@@ -156,7 +156,7 @@
       // ~⅓ of the bezier within the first frames), so early pushes are
       // length-capped: a point is kept only while it stays within EARLY_R of
       // the spawn tip — the first visible trail is a short, dense stub
-      // hugging the arm; the aging 12-point buffer does the rest.
+      // hugging the arm; the aging 16-point buffer does the rest.
       const EARLY_R = 20;
       if (this.launchT < this.launchDur && this.launchSx != null) {
         const dx = sx - this.launchSx, dy = sy - this.launchSy;
@@ -164,7 +164,9 @@
       } else {
         this.trail.push({ x: sx, y: sy, t: 0 });
       }
-      if (this.trail.length > 12) this.trail.shift();
+      // 16 points (was 12): a max-charge lob now hangs ~2s, so the streak
+      // needs the longer buffer to read as one continuous arc.
+      if (this.trail.length > 16) this.trail.shift();
       this.trail.forEach(p => p.t += dt);
 
       if (this.vh < 0) { // descending — check impacts
@@ -1253,24 +1255,49 @@
         }
         ctx.stroke();
         ctx.setLineDash([]);
-        // apex marker — aims the arc's crest, never the answer (landing)
+        // apex marker — aims the arc's crest, never the answer (landing).
+        // At the raised ceiling (Board.maxApexH = 10) far-lane apexes leave
+        // the canvas (row 0: 200 − 10·38·0.8 ≈ −104), so once the true apex
+        // would tuck behind the fence the marker clamps to a sky rail: a
+        // small up-chevron at the apex column + a faint dotted drop-line
+        // marking that column. The dotted preview above still runs to the
+        // true (off-screen) apex and clips naturally at the canvas edge.
         const apexX = B.colX(p.row, clamp(apexU, B.pultU, 11.2));
         const apexY = B.laneY[p.row] - B.heightPx(p.row, sc.H) - 14 * B.scale(p.row);
+        const APEX_RAIL_Y = 60;             // sky rail: floats just over the fence pickets (top y=70)
+        const RAIL_AT_Y = APEX_RAIL_Y + 10; // true apex at/above this -> rail mode
+        const onRail = apexY <= RAIL_AT_Y;
         ctx.save();
         ctx.globalAlpha = 0.5;
         ctx.strokeStyle = plunge ? '#b9ff2e' : '#ffffff';
         ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(apexX, apexY - 7); ctx.lineTo(apexX + 7, apexY);
-        ctx.lineTo(apexX, apexY + 7); ctx.lineTo(apexX - 7, apexY);
-        ctx.closePath(); ctx.stroke();
+        if (onRail) {
+          // up-chevron on the rail
+          ctx.beginPath();
+          ctx.moveTo(apexX - 8, APEX_RAIL_Y + 4); ctx.lineTo(apexX, APEX_RAIL_Y - 5);
+          ctx.lineTo(apexX + 8, APEX_RAIL_Y + 4);
+          ctx.stroke();
+          // faint dotted drop-line down the predicted apex column
+          ctx.globalAlpha = 0.28;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 7]);
+          ctx.beginPath();
+          ctx.moveTo(apexX, APEX_RAIL_Y + 12); ctx.lineTo(apexX, APEX_RAIL_Y + 62);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(apexX, apexY - 7); ctx.lineTo(apexX + 7, apexY);
+          ctx.lineTo(apexX, apexY + 7); ctx.lineTo(apexX - 7, apexY);
+          ctx.closePath(); ctx.stroke();
+        }
         ctx.restore();
         ctx.restore();
         if (plunge) {
           // smooth pulse, no strobe
           ctx.save();
           ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() / 130);
-          G.outlinedText(ctx, 'PLUNGE x2', apexX, apexY - 22, 16, '#b9ff2e');
+          G.outlinedText(ctx, 'PLUNGE x2', apexX, onRail ? APEX_RAIL_Y - 16 : apexY - 22, 16, '#b9ff2e');
           ctx.restore();
         }
       } else if (p.jumpT >= 1) {
@@ -1325,6 +1352,13 @@
         grad.addColorStop(0, '#7ddc5f'); grad.addColorStop(0.6, '#ffd23f'); grad.addColorStop(1, '#ff5030');
         ctx.fillStyle = grad;
         roundRectPath(ctx, bx, by + bh - fh, bw, fh, 4); ctx.fill();
+        // MAX ARC ceiling tick — bar top = the apex clamp (Board.maxApexH).
+        // One notch + one 8px label teaches where the arc ceiling sits.
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(bx - 4, by + 1, bw + 8, 2);
+        G.outlinedText(ctx, 'MAX ARC', bx + bw + 12, by + 3, 8, '#ffffff', 'left');
+        ctx.globalAlpha = 1;
         // turnaround cue: a 2px highlight rides the crest as the bar peaks and turns
         if (p.chargeTopGlow > 0) {
           ctx.globalAlpha = p.chargeTopGlow;
