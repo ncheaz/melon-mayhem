@@ -73,14 +73,21 @@
   }
 
   /* ================= MELON-PULT =================
-     opts: { squash, armAng, charge, recoil, hopY, blink, glow, heavy, lean } */
+     opts: { squash, hopSquash, armAng, charge, recoil, hopY, blink, glow, heavy, lean } */
   function drawPult(ctx, opts) {
-    const { squash = 0, armAng = -0.5, charge = 0, recoil = 0, hopY = 0,
+    const { squash = 0, hopSquash = 0, armAng = -0.5, charge = 0, recoil = 0, hopY = 0,
             blink = false, glow = 0, heavy = false, lean = 0 } = opts;
     ctx.save();
     ctx.translate(0, -hopY);
+    // HOP channel — whole-body deformation at ~2.3× the breath/charge squash
+    // strength, so the deformation clears the subliminal threshold:
+    //   +1.0 (takeoff/landing) → ~26% wider / 30% shorter (squash into base)
+    //   −0.75 (airborne apex)  → ~20% thinner / 22% taller (stretch)
+    // Plus a whole-body tilt folded INTO the lean rotation (not fighting it):
+    // negative → slight back-lean at apex, positive → forward dip on impact.
+    ctx.scale(1 + hopSquash * 0.26, 1 - hopSquash * 0.30);
     ctx.scale(1 + squash * 0.12, 1 - squash * 0.14);
-    ctx.rotate(lean);
+    ctx.rotate(lean + hopSquash * 0.14);
 
     // shadow (drawn by caller before translate? draw here, under)
     // -- pot base --

@@ -7,6 +7,33 @@
 (function () {
   const { clamp, lerp, rand, randi, pick, damp } = M;
 
+  // Fixed vertical rail for the pult at the left edge of the field.
+  // Hopping lanes (W/S) changes ONLY y/scale — the drawn x must never move.
+  // 222 ≈ colX(3,0) = 220.2 (near-row leftmost square center), tucked in the
+  // gap between the house's right edge (x=172) and the leftmost column
+  // (colX(r,0) ranges 323..220 across rows 0..3, so 222 hugs the field edge).
+  const PULT_RAIL_X = 222;
+
+  // Pult-only depth cue: mild extra scale response by lane, stacked on top of
+  // Board.scale() for the pult sprite, its shadow and rail dust FX ONLY.
+  // 0.92 (far row 0) → 1.08 (near row 3). Board.rowScale/laneY untouched.
+  function pultLaneScale(r) {
+    return 0.92 + 0.16 * clamp(r / (G.Board.ROWS - 1), 0, 1);
+  }
+
+  // Weight-of-hop squash channel driven purely by jumpT (0→1 over ~0.26s).
+  // + = squash (wide/short), − = stretch (tall/thin). Amplitudes are tuned to
+  // PERCEPTUAL thresholds at ±12–14%/1.0 scale: 1.0 → ±12–14% body deformation.
+  //   takeoff compress       t 0.00→0.20  peak +1.00 at t=0.10
+  //   airborne stretch       t 0.20→0.75  peak −0.75 at t≈0.475
+  //   landing anticipation   t 0.75→1.00  peak +1.10 at t≈0.875
+  function hopSquash(t) {
+    const takeoff = Math.sin(clamp(t / 0.20, 0, 1) * Math.PI) * 1.0;
+    const air = -Math.sin(clamp((t - 0.20) / 0.55, 0, 1) * Math.PI) * 0.75;
+    const land = Math.sin(clamp((t - 0.75) / 0.25, 0, 1) * Math.PI) * 1.1;
+    return takeoff + air + land;
+  }
+
   /* ================= Particles ================= */
   class Particle {
     constructor(o) { Object.assign(this, { vx: 0, vy: 0, g: 0, drag: 0, life: 0.6, t: 0, size: 3, color: '#fff', type: 'dot', rot: 0, vr: 0 }, o); }
@@ -82,6 +109,38 @@
       this.dead = false;
       this.trail = [];
       this.launchT = 0;
+      // Visual launch continuity: the pult rides a fixed rail x that sits LEFT
+      // of colX(row,0) on far lanes. The melon spawns at the drawn ARM TIP
+      // (scoop melon position) and rides a short quadratic bezier — control
+      // point = armTip + throwDir·30px, where throwDir continues the arm's
+      // up-right release direction (launchDeg) — that marries the projected
+      // path in ~0.14s. World (row,u) physics are untouched.
+      this.launchSx = (opts.launchSx != null) ? opts.launchSx : null;
+      this.launchSy = (opts.launchSy != null) ? opts.launchSy : null;
+      this.launchDur = 0.14;
+      if (this.launchSx != null) {
+        const rad = -this.launchDeg * Math.PI / 180; // up-right on screen
+        const tipS = B.scale(this.row);
+        this.launchCx = this.launchSx + Math.cos(rad) * 30 * tipS;
+        this.launchCy = this.launchSy + Math.sin(rad) * 30 * tipS;
+      }
+    }
+    projK() {
+      return 1 - Math.pow(1 - clamp(this.launchT / this.launchDur, 0, 1), 3); // ease-out cubic
+    }
+    // Quadratic bezier through (armTip → armTip+throwDir·30 → path point),
+    // parameterised by the eased k. k=1 lands EXACTLY on the projected path.
+    projSx() {
+      const sx = G.Board.colX(this.row, this.u);
+      if (this.launchSx == null) return sx;
+      const k = this.projK(), i = 1 - k;
+      return i * i * this.launchSx + 2 * i * k * this.launchCx + k * k * sx;
+    }
+    projSy() {
+      const sy = G.Board.laneY[this.row] - G.Board.heightPx(this.row, this.h);
+      if (this.launchSy == null) return sy;
+      const k = this.projK(), i = 1 - k;
+      return i * i * this.launchSy + 2 * i * k * this.launchCy + k * k * sy;
     }
     update(dt, game) {
       this.launchT += dt;
@@ -89,9 +148,22 @@
       this.u += this.vu * dt;
       this.h += this.vh * dt;
       this.spin += this.vu * dt * 2.4;
-      const sx = G.Board.colX(this.row, this.u);
-      const sy = G.Board.laneY[this.row] - G.Board.heightPx(this.row, this.h);
-      this.trail.push({ x: sx, y: sy, t: 0 });
+      const sx = this.projSx();
+      const sy = this.projSy();
+      // TRAIL FROM FRAME ONE — no launchDur gate: the streak traces the launch
+      // bezier too, so it visibly bridges arm → flight path with no gap.
+      // During the 0.14s ease the eased point sprints (ease-out cubic covers
+      // ~⅓ of the bezier within the first frames), so early pushes are
+      // length-capped: a point is kept only while it stays within EARLY_R of
+      // the spawn tip — the first visible trail is a short, dense stub
+      // hugging the arm; the aging 12-point buffer does the rest.
+      const EARLY_R = 20;
+      if (this.launchT < this.launchDur && this.launchSx != null) {
+        const dx = sx - this.launchSx, dy = sy - this.launchSy;
+        if (dx * dx + dy * dy <= EARLY_R * EARLY_R) this.trail.push({ x: sx, y: sy, t: 0 });
+      } else {
+        this.trail.push({ x: sx, y: sy, t: 0 });
+      }
       if (this.trail.length > 12) this.trail.shift();
       this.trail.forEach(p => p.t += dt);
 
@@ -136,9 +208,12 @@
     draw(ctx) {
       const B = G.Board;
       const s = B.scale(this.row);
-      const sx = B.colX(this.row, this.u);
+      const sx = this.projSx();
       const groundY = B.laneY[this.row];
-      const sy = Math.max(12, groundY - B.heightPx(this.row, this.h));
+      const sy = Math.max(12, this.projSy());
+      // melon grows 0.9× → 1× while marrying the path (starts at the arm,
+      // closer to camera feel)
+      const m = lerp(0.9, 1, this.projK());
       // shadow
       const sk = clamp(1 - this.h / 8, 0.15, 1);
       ctx.save();
@@ -159,7 +234,7 @@
       ctx.restore();
       ctx.save();
       ctx.translate(sx, sy);
-      ctx.scale(s, s);
+      ctx.scale(s * m, s * m);
       G.Sprites.drawMelon(ctx, this.heavy ? 17 : 15, this.plunge ? 0.5 + 0.3 * Math.sin(this.launchT * 20) : 0, this.heavy, this.spin);
       ctx.restore();
     }
@@ -322,28 +397,36 @@
       this.blinkT = rand(2, 4);
       this.blink = 0;
       this.hopY = 0;
+      this.shadowK = 0;    // damped follower of the hop arc — shadow lag
+      this.landSquash = 0; // post-touchdown impact squash (decays ~0.17s)
       this.holding = true;
       this.dead = false;
       this.deathT = 0;
     }
     get jumpK() { return this.jumpT < 1 ? this.jumpT : 1; }
     update(dt, game) {
+      this.screenX = PULT_RAIL_X; // drawn x — exposed for probes, constant on the rail
       if (this.dead) { this.deathT += dt; return; }
       // lane jump
       if (this.jumpT < 1) {
         this.jumpT += dt / 0.26;
         this.hopY = Math.sin(clamp(this.jumpT, 0, 1) * Math.PI) * 46;
+        // shadow follows the arc through an exp damper (k=10/s) → its shrink
+        // bottoms out just after the true apex and recovers after touchdown
+        this.shadowK = damp(this.shadowK, this.hopY / 46, 10, dt);
         if (this.jumpT >= 1) {
           this.row = this.jumpTo;
           this.hopY = 0;
+          this.landSquash = 1; // impact squash on touchdown (+0.9, ~0.15s decay)
           const B = G.Board;
-          game.dustBurst(B.colX(this.row, B.pultU), B.laneY[this.row], B.scale(this.row), 7);
+          game.dustBurst(PULT_RAIL_X, B.laneY[this.row], B.scale(this.row) * pultLaneScale(this.row), 11, 2.2);
           G.Audio.jumpWhoosh();
         }
       } else {
+        this.shadowK = damp(this.shadowK, 0, 10, dt);
         if (game.state === 'play') {
-          if (game.input.keyPressed['w'] && this.row > 0) this.startJump(this.row - 1);
-          if (game.input.keyPressed['s'] && this.row < G.Board.ROWS - 1) this.startJump(this.row + 1);
+          if (game.input.keyPressed['w'] && this.row > 0) this.startJump(this.row - 1, game);
+          if (game.input.keyPressed['s'] && this.row < G.Board.ROWS - 1) this.startJump(this.row + 1, game);
         }
       }
       // blink
@@ -354,6 +437,7 @@
       // recoil / arm
       this.recoil = Math.max(0, this.recoil - dt * 4);
       this.armSwing = Math.max(0, this.armSwing - dt * 7);
+      this.landSquash = Math.max(0, this.landSquash - dt * 6.7); // ~0.15s decay
       // charge
       if (this.charging) {
         const rate = dt / 0.85;
@@ -369,28 +453,62 @@
         if (q !== this.lastQ) { this.lastQ = q; G.Audio.chargeTick(this.charge); }
       }
     }
-    startJump(to) {
+    startJump(to, game) {
       if (to < 0 || to > G.Board.ROWS - 1 || to === this.row) return;
       this.jumpFrom = this.row;
       this.jumpTo = to;
       this.jumpT = 0;
       this.charging = false; this.charge = 0;
+      // takeoff: dust poof + loose soil/leaf chunks kicked off the pot
+      const B = G.Board;
+      const s = B.scale(this.row) * pultLaneScale(this.row);
+      game.dustBurst(PULT_RAIL_X, B.laneY[this.row], s, 9, 1.6);
+      for (let i = 0; i < 4; i++) {
+        game.particles.push(new Particle({
+          x: PULT_RAIL_X + rand(-34, 34) * s, y: B.laneY[this.row] - rand(2, 10) * s,
+          vx: rand(-140, 140), vy: rand(-230, -110), g: 640, vr: rand(-9, 9),
+          life: rand(0.35, 0.55), size: rand(1.8, 3.2) * s, type: 'chunk',
+          color: i >= 2 ? pick(['#3f9c46', '#48b04f']) : pick(['#6e4a26', '#7c5026']),
+        }));
+      }
       G.Audio.jumpWhoosh();
     }
     draw(ctx, time, game) {
       const B = G.Board;
-      const s = B.scale(this.row);
-      const u = this.jumpT < 1 ? lerp(this.jumpFrom, this.jumpTo, this.jumpT) : this.row;
-      const sx = B.colX(this.row, u) ;
-      const sy = B.laneY[this.row] - this.hopY;
-      // shadow shrinks while hopping
+      // Fixed vertical rail: sx never changes, hops are pure vertical travel.
+      const sx = PULT_RAIL_X;
+      const k = clamp(this.jumpT, 0, 1);
+      // Mid-hop, ease the lane line and perspective scale from→to lane.
+      // pultLaneScale adds a pult-only near-lane boost on top of the board
+      // projection — deepens near lanes without touching the board math.
+      const s = lerp(B.rowScale[this.jumpFrom] * pultLaneScale(this.jumpFrom),
+                     B.rowScale[this.jumpTo] * pultLaneScale(this.jumpTo), k);
+      const groundY = lerp(B.laneY[this.jumpFrom], B.laneY[this.jumpTo], k);
+      const sy = groundY - this.hopY;
+      // shadow: stays VISIBLE at apex — 48% of parked size, ~0.144 alpha
+      // (was 42% / 0.105 = invisible). LAGS the arc via the damped shadowK
+      // follower (k=10/s ≈ 0.1s). A faint detached ground-marker ellipse keeps
+      // the ground plane readable while the pult separates from the ground.
+      const shK = this.shadowK;
+      const shSize = 1 - 0.52 * shK;
       ctx.save();
-      ctx.globalAlpha = 0.3 * clamp(1 - this.hopY / 60, 0.3, 1);
+      ctx.globalAlpha = 0.30 * (1 - 0.52 * shK);
       ctx.fillStyle = '#000';
       ctx.beginPath();
-      ctx.ellipse(B.colX(this.row, u), B.laneY[this.row] + 3 * s, 34 * s, 8 * s, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx, groundY + 3 * s, 34 * s * shSize, 8 * s * shSize, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+      if (shK > 0.02) {
+        const markerFade = clamp(shK / 0.35, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = 0.10 * markerFade;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2.2 * s;
+        ctx.beginPath();
+        ctx.ellipse(sx, groundY + 3 * s, 40 * s, 9.5 * s, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       ctx.save();
       ctx.translate(sx, sy);
@@ -401,8 +519,17 @@
       }
       const breath = Math.sin(time * 2.2) * 0.03;
       const chargingSquash = this.charging ? -this.charge * 0.5 : 0;
+      // landing wobble: one small damped overshoot (~0.10 rad) as the impact
+      // squash decays — sin((1−ls)·π) rises once then settles to 0
+      const dir = this.jumpTo > this.jumpFrom ? 1 : -1;
+      const ls = this.landSquash;
+      const landWobble = ls > 0 ? Math.sin((1 - ls) * Math.PI) * 0.10 * Math.pow(ls, 0.6) * dir : 0;
       G.Sprites.drawPult(ctx, {
+        // breath/charge/recoil only — the hop has its own, much stronger channel
         squash: breath + chargingSquash - this.recoil * 0.6,
+        // hop deformation + post-touchdown impact squash, both on the
+        // whole-body hopSquash channel (see drawPult)
+        hopSquash: hopSquash(k) + this.landSquash * 0.9,
         armAng: -0.55 - this.charge * 1.9 + this.armSwing * 2.4,
         charge: this.charge,
         recoil: this.recoil,
@@ -411,7 +538,7 @@
         glow: this.charging ? this.charge : 0,
         heavy: game.heavySelected && game.ammo > 0,
         holding: this.holding && !this.dead,
-        lean: this.jumpT < 1 ? Math.sin(this.jumpT * Math.PI) * 0.12 * (this.jumpTo > this.jumpFrom ? 1 : -1) : 0,
+        lean: this.jumpT < 1 ? Math.sin(this.jumpT * Math.PI) * 0.30 * dir : landWobble,
       });
       ctx.restore();
     }
@@ -555,7 +682,7 @@
       this.loseCause = 'pult';
       this.pult.dead = true;
       this.camera.kick(20);
-      this.shakeBits(G.Board.colX(this.pult.row, G.Board.pultU), G.Board.laneY[this.pult.row], '#b0713a', 14);
+      this.shakeBits(this.pult.screenX, G.Board.laneY[this.pult.row], '#b0713a', 14);
       this.lose(z);
     }
     lose(z) {
@@ -604,19 +731,49 @@
       return clamp(B.toU(r, this.input.mx), B.pultU + 1.2, 11);
     }
     plungeThresholdF() { return 0.607; } // launch angle ≥ ~57° plunges over shields
+    // Screen-space position of the melon exactly as G.Sprites.drawPult paints
+    // the held/scoop melon for a given pose. Mirrors the sprite transform
+    // chain: arm-local melon (58,−6) → arm rotate a=armAng−recoil·0.55 →
+    // arm pivot (0,−74) → lean → squash scale (1+squash·0.12, 1−squash·0.14)
+    // → pult scale → rail origin. lean=0 at release (fire only when landed).
+    // ORDER-SAFE: charge/armSwing/recoil are passed as arguments — fire()
+    // computes the tip with (0, 1, 1), the SAME values it then assigns, so
+    // call order inside fire() cannot desync the pose. landSquash is read
+    // live because firing within ~0.15s of touchdown still squashes the body.
+    pultMelonScreen(p, charge, armSwing, recoil) {
+      const B = G.Board;
+      const squash = -recoil * 0.6 + p.landSquash * 0.9; // matches Pult.draw weights
+      const a = -0.55 - charge * 1.9 + armSwing * 2.4 - recoil * 0.55;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const rx = 58 * ca + 6 * sa;   // rotate scoop melon (58,−6) by a
+      const ry = 58 * sa - 6 * ca;
+      const px = rx, py = ry - 74;   // arm pivot sits above the head box
+      const sqx = 1 + squash * 0.12, sqy = 1 - squash * 0.14;
+      const s = B.scale(p.row) * pultLaneScale(p.row);
+      return {
+        x: PULT_RAIL_X + s * (px * sqx),
+        y: B.laneY[p.row] - p.hopY + s * (py * sqy),
+      };
+    }
     fire(force, heavy) {
       const B = G.Board;
       const p = this.pult;
       const apexU = this.apexUFromMouse();
       const d = Math.max(0.8, apexU - B.pultU);
-      this.projectiles.push(new Projectile(p.row, B.pultU, { apexU, force, heavy }));
+      // Spawn at the drawn arm tip using the pose the pult renders on THIS
+      // frame (post-release: charge 0, armSwing 1, recoil 1) → the melon's
+      // first frame continues visually from the scoop. Args are passed
+      // explicitly, so assigning p.recoil/p.armSwing below is order-safe.
+      const tip = this.pultMelonScreen(p, 0, 1, 1);
+      this.projectiles.push(new Projectile(p.row, B.pultU, { apexU, force, heavy, launchSx: tip.x, launchSy: tip.y }));
       p.recoil = 1; p.armSwing = 1; p.holding = false;
       setTimeout(() => { p.holding = true; }, 420);
       heavy ? G.Audio.heavyShoot() : G.Audio.shoot(force);
       this.camera.kick(heavy ? 9 : 3.5 + force * 3);
-      // muzzle leaves
-      const sx = B.colX(p.row, B.pultU) + 40 * B.scale(p.row);
-      const sy = B.laneY[p.row] - 78 * B.scale(p.row);
+      // muzzle leaves — anchored to the fixed rail, pult-lane scale
+      const sc = B.scale(p.row) * pultLaneScale(p.row);
+      const sx = PULT_RAIL_X + 40 * sc;
+      const sy = B.laneY[p.row] - 78 * sc;
       for (let i = 0; i < 6; i++) {
         this.particles.push(new Particle({
           x: sx, y: sy, vx: rand(40, 160), vy: rand(-90, -20), g: 300, life: 0.4,
@@ -892,11 +1049,12 @@
         }));
       }
     }
-    dustBurst(x, y, s, n) {
+    dustBurst(x, y, s, n, spread = 1) {
       for (let i = 0; i < n; i++) {
         this.particles.push(new Particle({
-          x: x + rand(-14, 14) * s, y: y + rand(-4, 2), vx: rand(-70, 70), vy: rand(-60, -10), g: -30,
-          life: rand(0.3, 0.6), size: rand(3, 6) * s, color: '#c9c0a8', type: 'dust',
+          x: x + rand(-14, 14) * s * spread, y: y + rand(-4, 2),
+          vx: rand(-70, 70) * spread, vy: rand(-60, -10) * (0.6 + 0.4 * spread), g: -30,
+          life: rand(0.3, 0.6) * (1 + 0.25 * (spread - 1)), size: rand(3, 6) * s, color: '#c9c0a8', type: 'dust',
         }));
       }
     }
@@ -1149,7 +1307,7 @@
       // force bar while charging
       if (p.charging) {
         const B = G.Board;
-        const bx = B.colX(p.row, B.pultU) + 64 * B.scale(p.row);
+        const bx = PULT_RAIL_X + 64 * B.scale(p.row);
         const by = B.laneY[p.row] - 130 * B.scale(p.row);
         const bw = 20, bh = 120 * B.scale(p.row);
         ctx.save();
