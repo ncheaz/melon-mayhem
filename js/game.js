@@ -393,7 +393,8 @@
       this.recoil = 0;
       this.armSwing = 0;
       this.lastQ = -1;
-      this.overloadFlash = 0;
+      this.chargePhase = 0;  // 0→1 per half-cycle of the charge oscillation
+      this.chargeTopGlow = 0; // brief fade cue when the bar turns around at max
       this.blinkT = rand(2, 4);
       this.blink = 0;
       this.hopY = 0;
@@ -431,23 +432,27 @@
       }
       // blink
       this.blinkT -= dt;
-      this.overloadFlash = Math.max(0, this.overloadFlash - dt);
+      this.chargeTopGlow = Math.max(0, this.chargeTopGlow - dt / 0.3); // turnaround-cue fade
       if (this.blinkT <= 0) { this.blink = 0.12; this.blinkT = rand(2.2, 4.5); }
       this.blink = Math.max(0, this.blink - dt);
       // recoil / arm
       this.recoil = Math.max(0, this.recoil - dt * 4);
       this.armSwing = Math.max(0, this.armSwing - dt * 7);
       this.landSquash = Math.max(0, this.landSquash - dt * 6.7); // ~0.15s decay
-      // charge
+      // charge — one smooth cosine oscillation while held: up…down…up, forever.
+      // Each half-cycle is a cosine ease, so charge sweeps out of 0, eases into
+      // 1.0, touches it for an instant only, and immediately descends — zero
+      // dwell at max, no stall, no wrap. Pace unchanged: 0.85s up, 0.85s down.
       if (this.charging) {
-        const rate = dt / 0.85;
-        if (this.chargeUp) {
-          this.charge += rate;
-          if (this.charge >= 1) { this.charge = 1; this.chargeUp = false; G.Audio.chargeFull(); this.overloadFlash = 0.35; }
-        } else {
-          this.charge -= rate;
-          if (this.charge <= 0) { this.charge = 0; this.chargeUp = true; }
+        this.chargePhase += dt / 0.85;
+        if (this.chargePhase >= 1) {
+          this.chargePhase -= 1;
+          if (this.chargeUp) { this.chargeUp = false; this.chargeTopGlow = 1; G.Audio.chargeTop(); } // peaked — turn around
+          else this.chargeUp = true; // bottomed out — rise again
         }
+        const ph = Math.min(this.chargePhase, 1);
+        const c = (1 - Math.cos(ph * Math.PI)) / 2;
+        this.charge = this.chargeUp ? c : 1 - c;
         // charge ticks
         const q = Math.floor(this.charge * 10);
         if (q !== this.lastQ) { this.lastQ = q; G.Audio.chargeTick(this.charge); }
@@ -459,6 +464,7 @@
       this.jumpTo = to;
       this.jumpT = 0;
       this.charging = false; this.charge = 0;
+      this.chargePhase = 0; this.chargeUp = true; this.chargeTopGlow = 0;
       // takeoff: dust poof + loose soil/leaf chunks kicked off the pot
       const B = G.Board;
       const s = B.scale(this.row) * pultLaneScale(this.row);
@@ -699,7 +705,7 @@
       const inp = this.input;
       const canAct = p.jumpT >= 1;
       if (canAct && inp.lmb && !p.charging) {
-        p.charging = true; p.charge = 0; p.chargeUp = true; p.lastQ = -1;
+        p.charging = true; p.charge = 0; p.chargeUp = true; p.chargePhase = 0; p.chargeTopGlow = 0; p.lastQ = -1;
       }
       if (p.charging) {
         if (!inp.lmb) {
@@ -713,6 +719,7 @@
         if (this.ammo > 0) {
           this.ammo--;
           p.charging = false; p.charge = 0; // heavy shot cancels charge
+          p.chargePhase = 0; p.chargeUp = true; p.chargeTopGlow = 0;
           this.fire(this.aimForceSuggestion(), true);
           p.recoil = 1.4; p.armSwing = 1;
         } else {
@@ -1318,8 +1325,19 @@
         grad.addColorStop(0, '#7ddc5f'); grad.addColorStop(0.6, '#ffd23f'); grad.addColorStop(1, '#ff5030');
         ctx.fillStyle = grad;
         roundRectPath(ctx, bx, by + bh - fh, bw, fh, 4); ctx.fill();
-        // current launch angle readout
-        G.outlinedText(ctx, `${Math.round(30 + p.charge * 45)}°`, bx + bw / 2, by + bh + 16, 15, '#ffe9a0');
+        // turnaround cue: a 2px highlight rides the crest as the bar peaks and turns
+        if (p.chargeTopGlow > 0) {
+          ctx.globalAlpha = p.chargeTopGlow;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(bx, by + bh - fh, bw, 2);
+          ctx.globalAlpha = 1;
+        }
+        // current launch angle readout — brightens toward white for a beat at the peak
+        const tg = p.chargeTopGlow;
+        const degCol = tg > 0
+          ? `rgb(255,${Math.round(233 + 22 * tg)},${Math.round(160 + 95 * tg)})`
+          : '#ffe9a0';
+        G.outlinedText(ctx, `${Math.round(30 + p.charge * 45)}°`, bx + bw / 2, by + bh + 16, 15, degCol);
         // plunge threshold marker
         const fNeeded = this.plungeThresholdF();
         if (fNeeded > 0 && fNeeded < 1) {
@@ -1327,9 +1345,6 @@
           ctx.strokeStyle = '#b9ff2e'; ctx.lineWidth = 3;
           ctx.beginPath(); ctx.moveTo(bx - 8, myy); ctx.lineTo(bx + bw + 8, myy); ctx.stroke();
           G.outlinedText(ctx, 'PLUNGE', bx + bw + 12, myy, 12, '#b9ff2e', 'left');
-        }
-        if (p.overloadFlash > 0) {
-          G.outlinedText(ctx, 'OVERLOAD!', bx + bw / 2, by - 16, 13, '#ff5030');
         }
         ctx.restore();
       }

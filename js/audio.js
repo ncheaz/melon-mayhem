@@ -65,6 +65,7 @@
 
     /* ---- game sounds ---- */
     chargeTick(f) { this.osc('sine', 140 + f * 420, null, 0.06, 0.05); }
+    chargeTop() { this.osc('sine', 1180, null, 0.05, 0.03); } // soft crest blip at the top turnaround
     chargeFull() { this.osc('square', 880, null, 0.09, 0.06); }
     shoot(power) {
       this.noise(0.12, 0.35, 900, 0, 'lowpass');
