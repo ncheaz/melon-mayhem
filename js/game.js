@@ -606,10 +606,10 @@
       this.lastDirectZombie = null;
       this.stageStats = { kills: 0, glory: 0 };
       this.tips = [
-        'Steep arcs plunge over shields — apex height is your skill lever.',
-        'A kneed zombie is a glory kill. Heavy ammo comes from glory.',
-        'Body splash drops shields instantly. Aim past the door.',
-        'Tombstones eat low shots. Arc higher or go through with iron.',
+        'W/S hop the pult along the left rail · lanes only, no side-steps.',
+        'The meter swings up, then back down — release at the top for max power.',
+        'High arcs sail over tombstones AND score x2 — lob high, harvest double.',
+        'Head-hits kneel · finish the kneeler for a glory kill · glory forges iron.',
       ];
     }
 
@@ -1408,7 +1408,7 @@
       if (this.stage === 1 && this.wave === 1) {
         ctx.save();
         ctx.globalAlpha = clamp(12 - this.bannerT * 0.5, 0, 1) * 0.85;
-        G.outlinedText(ctx, 'Hold LMB to charge — release to lob · angles 30°–75° · steep arc = PLUNGE x2', 640, 142, 18, '#ffffff');
+        G.outlinedText(ctx, 'Hold LMB — power swings up & down · release to lob · HIGH ARC = x2', 640, 142, 18, '#ffffff');
         ctx.restore();
       }
     }
@@ -1449,8 +1449,8 @@
       ctx.globalAlpha = pulse;
       G.outlinedText(ctx, 'CLICK TO DEFEND YOUR BRAIN', 640, 320, 30, '#ffffff');
       ctx.globalAlpha = 1;
-      G.outlinedText(ctx, 'Hold LMB: charge & lob · Mouse X: arc midpoint · Steep arc = PLUNGE x2', 640, 380, 17, '#cfe8c2');
-      G.outlinedText(ctx, 'RMB: heavy iron shell · W/S: jump lanes · Glory kills forge iron', 640, 406, 17, '#cfe8c2');
+      G.outlinedText(ctx, 'W/S hop the left-edge rail · hold LMB — power swings, release to lob', 640, 380, 17, '#cfe8c2');
+      G.outlinedText(ctx, 'Mouse X sets the arc apex · HIGH ARC = x2 · RMB iron shell · glory kills forge iron', 640, 406, 17, '#cfe8c2');
       G.outlinedText(ctx, 'P pause · M mute · R restart', 640, 432, 15, '#9fd6a8');
       ctx.restore();
     }
