@@ -9,10 +9,10 @@
 
   // Fixed vertical rail for the pult at the left edge of the field.
   // Hopping lanes (W/S) changes ONLY y/scale — the drawn x must never move.
-  // 222 ≈ colX(3,0) = 220.2 (near-row leftmost square center), tucked in the
-  // gap between the house's right edge (x=172) and the leftmost column
-  // (colX(r,0) ranges 323..220 across rows 0..3, so 222 hugs the field edge).
-  const PULT_RAIL_X = 222;
+  // 236 = colX(r,0) in EVERY lane now (uniform row scale: colX is
+  // row-independent), so the rail sits exactly on the leftmost square of
+  // whichever lane the pult occupies, between the house (x<172) and column 0.
+  const PULT_RAIL_X = 236;
 
   // HIGH ARC threshold, in units of apex HEIGHT: ANY hit delivered from an
   // arc that crests at/above this counts as TWO hits (every damage popup from
@@ -337,13 +337,16 @@
         ctx.globalAlpha = k;
         sy += (1 - k) * 60 * s;
       }
-      // shadow
-      ctx.globalAlpha *= 1;
+      // shadow: two layers — soft ground pool + tight dark contact core
       ctx.save();
-      ctx.globalAlpha = 0.28;
+      ctx.globalAlpha = 0.22;
       ctx.fillStyle = '#000';
       ctx.beginPath();
-      ctx.ellipse(sx, sy + 3 * s, 26 * s, 7 * s, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx, sy + 3 * s, 30 * s, 8 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.38;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy + 2.5 * s, 19 * s, 5 * s, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
@@ -1275,8 +1278,8 @@
         ctx.stroke();
         ctx.setLineDash([]);
         // apex marker — aims the arc's crest, never the answer (landing).
-        // At the raised ceiling (Board.maxApexH = 10) far-lane apexes leave
-        // the canvas (row 0: 200 − 10·38·0.8 ≈ −104), so once the true apex
+        // At the raised ceiling (Board.maxApexH = 10) far-lane apexes still
+        // leave the canvas (row 0: 306 − 10·38·0.86 ≈ −21), so once the true apex
         // would tuck behind the fence the marker clamps to a sky rail: a
         // small up-chevron at the apex column + a faint dotted drop-line
         // marking that column. The dotted preview above still runs to the

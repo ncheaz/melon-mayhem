@@ -75,15 +75,17 @@ class Camera {
 }
 G.Camera = Camera;
 
-/* ---------------- Board projection (3/4 perspective) ----------------
+/* ---------------- Board projection (near-side view) ----------------
    4 rows x 10 cols. Row 0 = far (small), row 3 = near (large).      */
 const Board = {
   ROWS: 4, COLS: 10,
   centerX: 640,
-  // 4x10 board, 3/4 perspective: lane gaps compress toward the horizon.
-  // Narrow width fan so the silhouette reads as parallel corridors, not stairs.
-  laneY: [200, 308, 432, 575],
-  rowScale: [0.80, 0.89, 0.97, 1.06],
+  // 4x10 board viewed nearly side-on: lane gaps are uniform (84/82/82 px)
+  // and scale is uniform across rows, so lane lines are PARALLEL and column
+  // divisions NON-CONVERGING — the lawn reads as four stacked side-view
+  // corridors (PvZ-style), never a floor plane seen from above.
+  laneY: [306, 390, 472, 554],
+  rowScale: [1.0, 1.0, 1.0, 1.0],
   colW: 88,
   pultU: 0.0,                   // pult sits ON the leftmost square of its lane
   pxPerHeight: 38,              // pixels per height-unit at scale 1
@@ -91,7 +93,8 @@ const Board = {
   maxApexH: 10,                 // apex ceiling in height units (was 6.5): max charge is a dramatic lob that clears tombstones (1.75u) ~5.7× at any aim past mid-board
 
   scale(r) { return this.rowScale[r]; },
-  // world u (col units, can be fractional) -> screen x for row r
+  // world u (col units, can be fractional) -> screen x for row r.
+  // With uniform rowScale this is row-independent: vertical column lines.
   colX(r, u) { return this.centerX + (u - 4.5) * this.colW * this.scale(r); },
   // screen x -> world u for row r
   toU(r, sx) { return (sx - this.centerX) / (this.colW * this.scale(r)) + 4.5; },
