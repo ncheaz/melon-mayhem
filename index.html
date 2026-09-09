@@ -8,12 +8,18 @@
 </head>
 <body>
 <div id="wrap">
-  <canvas id="game" width="1280" height="720"></canvas>
+  <div id="stage">
+    <canvas id="game3d" width="1280" height="720"></canvas>
+    <canvas id="game" width="1280" height="720"></canvas>
+  </div>
   <div id="hint">LMB hold: power swings — release to lob · Mouse X: arc apex · HIGH ARC = x2 · RMB: iron shell · W/S: rail hop · P: pause · M: mute · R: restart</div>
 </div>
+<script>window.G = { IS3D: !new URLSearchParams(location.search).has('flat') };</script>
+<script src="js/lib/three.min.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/sprites.js"></script>
+<script src="js/render3d.js"></script>
 <script src="js/game.js"></script>
 <script src="js/main.js"></script>
 </body>

@@ -13,15 +13,24 @@ html, body {
   justify-content: center;
   gap: 8px;
 }
-#game {
-  background: #87ceeb;
-  image-rendering: auto;
+#stage {
+  position: relative;
+  width: min(96vw, calc((96vh - 40px) * 16 / 9));
+  aspect-ratio: 16 / 9;
   border-radius: 10px;
   box-shadow: 0 0 0 3px #1c2b1f, 0 18px 60px rgba(0,0,0,.6);
   cursor: crosshair;
-  max-width: 96vw;
-  max-height: calc(96vh - 40px);
+  overflow: hidden;
 }
+#stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+}
+#game3d { background: #87ceeb; }
+#game { background: transparent; }
 #hint {
   color: #9fd6a8;
   font-size: 13px;

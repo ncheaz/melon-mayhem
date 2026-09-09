@@ -3,7 +3,7 @@
    Core helpers: math, input, camera shake, time, projection.
    ============================================================ */
 'use strict';
-window.G = {};
+window.G = window.G || {};
 
 const M = {
   clamp: (v, a, b) => v < a ? a : (v > b ? b : v),
@@ -31,6 +31,13 @@ class Input {
       const r = canvas.getBoundingClientRect();
       this.mx = (e.clientX - r.left) * (canvas.width / r.width);
       this.my = (e.clientY - r.top) * (canvas.height / r.height);
+      // 3D mode: the aim reads board-u through the real camera — unproject
+      // the pointer ray onto the ground plane, then re-encode as the screen x
+      // the pult's lane would show it at (row-independent with a yaw-free cam)
+      if (G.IS3D && G.R3 && G.R3.ready) {
+        const u = G.R3.pointerToU(this.mx, this.my);
+        if (u != null && G.game) this.mx = G.Board.colX(G.game.pult.row, u);
+      }
     });
     canvas.addEventListener('mousedown', e => {
       e.preventDefault();

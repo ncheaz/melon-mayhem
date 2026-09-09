@@ -14,6 +14,13 @@
   // whichever lane the pult occupies, between the house (x<172) and column 0.
   const PULT_RAIL_X = 236;
 
+  // Rail anchor for overlay FX & probes. In 3D the perspective makes
+  // colX(row,0) row-dependent — always derive from the live projection;
+  // flat mode keeps the legacy constant.
+  function pultRailX(row) {
+    return G.IS3D ? G.Board.colX(row, 0) : PULT_RAIL_X;
+  }
+
   // HIGH ARC threshold, in units of apex HEIGHT: ANY hit delivered from an
   // arc that crests at/above this counts as TWO hits (every damage popup from
   // that shot gets ' x2'). Half the apex ceiling (Board.maxApexH = 10),
@@ -118,6 +125,7 @@
       this.spin = 0;
       this.dead = false;
       this.trail = [];
+      this.trail3d = [];   // world-space trail for the 3D bead chain
       this.launchT = 0;
       // Visual launch continuity: the pult rides a fixed rail x that sits LEFT
       // of colX(row,0) on far lanes. The melon spawns at the drawn ARM TIP
@@ -179,6 +187,27 @@
       if (this.trail.length > 16) this.trail.shift();
       this.trail.forEach(p => p.t += dt);
 
+      // world-space trail for the 3D bead chain — mirrors the exact visual
+      // path (launch bezier bridge included) so the 3D streak matches 1:1
+      {
+        let wx, wy, wh;
+        if (this.launchSx != null && this._tip3D && this.launchT < this.launchDur) {
+          const k = this.projK(), i = 1 - k;
+          const ph = { x: (this.u - 4.5) * G.R3.COL_W3D, y: Math.max(0.2, this.h) * G.R3.H3D, z: (this.row - 1.5) * G.R3.LANE_D3D };
+          const c = this._ctrl3D, t0 = this._tip3D;
+          wx = i * i * t0.x + 2 * i * k * c.x + k * k * ph.x;
+          wy = i * i * t0.y + 2 * i * k * c.y + k * k * ph.y;
+          wh = i * i * t0.z + 2 * i * k * c.z + k * k * ph.z;
+        } else {
+          wx = (this.u - 4.5) * G.R3.COL_W3D;
+          wy = Math.max(0.2, this.h) * G.R3.H3D;
+          wh = (this.row - 1.5) * G.R3.LANE_D3D;
+        }
+        this.trail3d.push({ x: wx, y: wy, z: wh, t: 0 });
+        if (this.trail3d.length > 16) this.trail3d.shift();
+        this.trail3d.forEach(p => p.t += dt);
+      }
+
       if (this.vh < 0) { // descending — check impacts
         // tombstones block low arcs
         for (const ob of game.obstacles) {
@@ -223,6 +252,7 @@
       const sx = this.projSx();
       const groundY = B.laneY[this.row];
       const sy = Math.max(12, this.projSy());
+      if (!G.IS3D) {
       // melon grows 0.9× → 1× while marrying the path (starts at the arm,
       // closer to camera feel)
       const m = lerp(0.9, 1, this.projK());
@@ -235,6 +265,13 @@
       ctx.ellipse(sx, groundY + 4 * s, 16 * s * sk, 5.5 * s * sk, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.scale(s * m, s * m);
+      G.Sprites.drawMelon(ctx, this.heavy ? 17 : 15, this.highArc ? 0.5 + 0.3 * Math.sin(this.launchT * 20) : 0, this.heavy, this.spin);
+      ctx.restore();
+      }
+      // trail (both modes — screen-projected from the live path)
       // trail
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
@@ -243,11 +280,6 @@
         ctx.fillStyle = this.heavy ? '#ff9c40' : '#eaffb0';
         ctx.beginPath(); ctx.arc(p.x, p.y, 7 * s * (i / this.trail.length), 0, Math.PI * 2); ctx.fill();
       });
-      ctx.restore();
-      ctx.save();
-      ctx.translate(sx, sy);
-      ctx.scale(s * m, s * m);
-      G.Sprites.drawMelon(ctx, this.heavy ? 17 : 15, this.highArc ? 0.5 + 0.3 * Math.sin(this.launchT * 20) : 0, this.heavy, this.spin);
       ctx.restore();
     }
   }
@@ -335,8 +367,9 @@
       if (this.state === 'spawn') {
         const k = clamp(this.spawnT / 0.55, 0, 1);
         ctx.globalAlpha = k;
-        sy += (1 - k) * 60 * s;
+        if (!G.IS3D) sy += (1 - k) * 60 * s;
       }
+      if (!G.IS3D) {
       // shadow: two layers — soft ground pool + tight dark contact core
       ctx.save();
       ctx.globalAlpha = 0.22;
@@ -369,6 +402,12 @@
         type: this.type,
         lean: this.lean || 0,
       }, time);
+      } else {
+        // 3D: the body is a real mesh — overlay anchors at the projected feet
+        ctx.translate(sx, sy);
+        ctx.scale(s * (this.type === 'brute' ? 1.28 : 1), s * (this.type === 'brute' ? 1.28 : 1));
+        if (this.type === 'runner') { ctx.scale(0.94, 0.94); }
+      }
 
       // health bar (only when damaged)
       if (this.hp < this.maxHp && this.state !== 'die' && this.state !== 'glorydie') {
@@ -421,7 +460,7 @@
     }
     get jumpK() { return this.jumpT < 1 ? this.jumpT : 1; }
     update(dt, game) {
-      this.screenX = PULT_RAIL_X; // drawn x — exposed for probes, constant on the rail
+      this.screenX = pultRailX(this.row); // drawn x — exposed for probes, constant on the rail
       if (this.dead) { this.deathT += dt; return; }
       // lane jump
       if (this.jumpT < 1) {
@@ -435,7 +474,7 @@
           this.hopY = 0;
           this.landSquash = 1; // impact squash on touchdown (+0.9, ~0.15s decay)
           const B = G.Board;
-          game.dustBurst(PULT_RAIL_X, B.laneY[this.row], B.scale(this.row) * pultLaneScale(this.row), 11, 2.2);
+          game.dustBurst(pultRailX(this.row), B.laneY[this.row], B.scale(this.row) * pultLaneScale(this.row), 11, 2.2);
           G.Audio.jumpWhoosh();
         }
       } else {
@@ -482,11 +521,12 @@
       this.chargePhase = 0; this.chargeUp = true; this.chargeTopGlow = 0;
       // takeoff: dust poof + loose soil/leaf chunks kicked off the pot
       const B = G.Board;
+      const railX = pultRailX(this.row);
       const s = B.scale(this.row) * pultLaneScale(this.row);
-      game.dustBurst(PULT_RAIL_X, B.laneY[this.row], s, 9, 1.6);
+      game.dustBurst(railX, B.laneY[this.row], s, 9, 1.6);
       for (let i = 0; i < 4; i++) {
         game.particles.push(new Particle({
-          x: PULT_RAIL_X + rand(-34, 34) * s, y: B.laneY[this.row] - rand(2, 10) * s,
+          x: railX + rand(-34, 34) * s, y: B.laneY[this.row] - rand(2, 10) * s,
           vx: rand(-140, 140), vy: rand(-230, -110), g: 640, vr: rand(-9, 9),
           life: rand(0.35, 0.55), size: rand(1.8, 3.2) * s, type: 'chunk',
           color: i >= 2 ? pick(['#3f9c46', '#48b04f']) : pick(['#6e4a26', '#7c5026']),
@@ -571,7 +611,7 @@
       this.canvas = canvas;
       this.input = input;
       this.camera = new G.Camera();
-      this.bg = G.Sprites.bakeBackground();
+      this.bg = G.IS3D ? null : G.Sprites.bakeBackground();
       this.highScore = parseInt(localStorage.getItem('mm_high') || '0', 10);
       this.reset();
       this.state = 'menu';
@@ -796,15 +836,30 @@
       // frame (post-release: charge 0, armSwing 1, recoil 1) → the melon's
       // first frame continues visually from the scoop. Args are passed
       // explicitly, so assigning p.recoil/p.armSwing below is order-safe.
-      const tip = this.pultMelonScreen(p, 0, 1, 1);
-      this.projectiles.push(new Projectile(p.row, B.pultU, { apexU, force, heavy, launchSx: tip.x, launchSy: tip.y }));
+      // 3D mode: tip comes from the real 3D arm geometry (projected for the
+      // 2D trail; world-space for the mesh's bezier bridge).
+      let tip, tip3D = null;
+      if (G.IS3D && G.R3.ready) {
+        tip3D = G.R3.pultTip3D(p);
+        tip = G.R3.project(tip3D);
+      } else {
+        tip = this.pultMelonScreen(p, 0, 1, 1);
+      }
+      const pr = new Projectile(p.row, B.pultU, { apexU, force, heavy, launchSx: tip.x, launchSy: tip.y });
+      if (tip3D) {
+        pr._tip3D = tip3D;
+        // control point continues the release throw direction (up-right)
+        const rad = -35 * Math.PI / 180;
+        pr._ctrl3D = tip3D.clone().add(new THREE.Vector3(Math.cos(rad), Math.sin(rad), 0).multiplyScalar(30 * G.R3.K));
+      }
+      this.projectiles.push(pr);
       p.recoil = 1; p.armSwing = 1; p.holding = false;
       setTimeout(() => { p.holding = true; }, 420);
       heavy ? G.Audio.heavyShoot() : G.Audio.shoot(force);
       this.camera.kick(heavy ? 9 : 3.5 + force * 3);
       // muzzle leaves — anchored to the fixed rail, pult-lane scale
       const sc = B.scale(p.row) * pultLaneScale(p.row);
-      const sx = PULT_RAIL_X + 40 * sc;
+      const sx = pultRailX(p.row) + 40 * sc;
       const sy = B.laneY[p.row] - 78 * sc;
       for (let i = 0; i < 6; i++) {
         this.particles.push(new Particle({
@@ -829,7 +884,7 @@
       const syTop = B.laneY[pr.row] - B.heightPx(pr.row, pr.h);
       if (pr.heavy) {
         // iron shell detonates: one-hit kill on contact + small blast radius
-        this.craters.push({ x: sx, y: B.laneY[pr.row], row: pr.row, t: 0, heavy: true });
+        this.craters.push({ x: sx, y: B.laneY[pr.row], row: pr.row, u: z.u, t: 0, heavy: true });
         if (this.craters.length > 12) this.evictOldestCrater();
         this.killZombie(z, 'heavy');
         for (const other of this.zombies) {
@@ -1019,7 +1074,7 @@
       const sx = B.colX(pr.row, pr.u);
       const sy = B.laneY[pr.row];
       // scorch decal lingers as evidence of the shot
-      this.craters.push({ x: sx, y: sy, row: pr.row, t: 0, heavy: false });
+      this.craters.push({ x: sx, y: sy, row: pr.row, u: pr.u, t: 0, heavy: false });
       if (this.craters.length > 12) this.evictOldestCrater();
       this.dustBurst(sx, sy - 6, B.scale(pr.row), 6);
       // melon shatters
@@ -1161,8 +1216,10 @@
       ctx.save();
       this.camera.apply(ctx);
 
-      ctx.drawImage(this.bg, 0, 0);
+      const is3d = G.IS3D;
+      if (!is3d) ctx.drawImage(this.bg, 0, 0);
 
+      if (!is3d) {
       // scorch craters under everything else (far lanes keep a legible minimum size)
       for (const cr of this.craters) {
         const s = Math.max(0.9, G.Board.scale(cr.row)) * (cr.heavy ? 1.6 : 1);
@@ -1206,12 +1263,13 @@
         G.Sprites.drawTombstone(ctx, 2 - ob.hp);
         ctx.restore();
       }
+      } // end !is3d (2D-only field decals)
 
       // entities sorted by row (far first)
       const actors = [];
       for (const z of this.zombies) actors.push({ row: z.row, draw: () => z.draw(ctx, time) });
       for (const p of this.projectiles) actors.push({ row: p.row, draw: () => p.draw(ctx) });
-      if (this.state !== 'menu') actors.push({ row: this.pult.row, draw: () => this.pult.draw(ctx, time, this) });
+      if (!is3d && this.state !== 'menu') actors.push({ row: this.pult.row, draw: () => this.pult.draw(ctx, time, this) });
       actors.sort((a, b) => a.row - b.row);
       for (const a of actors) a.draw();
 
@@ -1363,7 +1421,7 @@
       // force bar while charging
       if (p.charging) {
         const B = G.Board;
-        const bx = PULT_RAIL_X + 64 * B.scale(p.row);
+        const bx = pultRailX(p.row) + 64 * B.scale(p.row);
         const by = B.laneY[p.row] - 130 * B.scale(p.row);
         const bw = 20, bh = 120 * B.scale(p.row);
         ctx.save();
@@ -1423,10 +1481,12 @@
       ctx.save();
       ctx.globalAlpha = a;
       ctx.translate(640 + off, 200);
-      ctx.fillStyle = 'rgba(20,30,16,0.75)';
+      ctx.fillStyle = 'rgba(14,20,12,0.88)';
       roundRectPath(ctx, -280, -36, 560, 72, 14); ctx.fill();
-      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 3.5;
       roundRectPath(ctx, -280, -36, 560, 72, 14); ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 7;
+      roundRectPath(ctx, -286, -42, 572, 84, 17); ctx.stroke();
       G.outlinedText(ctx, this.banner, 0, 0, 36, '#ffe9a0');
       ctx.restore();
     }
@@ -1437,7 +1497,8 @@
       const bob = Math.sin(this.menuT * 2) * 8;
       G.outlinedText(ctx, 'MELON MAYHEM', 640, 150 + bob, 84, '#8ee05c', 'center', '#1a2a10', 14);
       G.outlinedText(ctx, 'GARDEN ARTILLERY DEFENSE', 640, 215 + bob * 0.5, 26, '#ffe9a0');
-      // preview: idle pult + zombie
+      // preview: idle pult + zombie (2D mode; 3D shows the live scene instead)
+      if (!G.IS3D) {
       ctx.save();
       ctx.translate(500, 560);
       ctx.scale(1.4, 1.4);
@@ -1448,6 +1509,7 @@
       ctx.scale(1.4, 1.4);
       G.Sprites.drawZombie(ctx, { pose: 'hold', walkPhase: 0, seed: 3, hitFlash: 0, shield: false, helmet: true, dents: 0, dieT: 0, type: 'shambler', kneelTimer: 0 }, this.menuT);
       ctx.restore();
+      }
       const pulse = 0.75 + Math.sin(this.menuT * 4) * 0.25;
       ctx.globalAlpha = pulse;
       G.outlinedText(ctx, 'CLICK TO DEFEND YOUR BRAIN', 640, 320, 30, '#ffffff');

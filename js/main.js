@@ -6,11 +6,16 @@
 (function () {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  if (G.IS3D) {
+    try { G.R3.init(document.getElementById('game3d')); }
+    catch (e) { console.error('3D init failed, falling back to 2D:', e); G.IS3D = false; }
+  }
   const input = new G.Input(canvas);
   const game = new G.Game(canvas, input);
   G.game = game;
 
   let last = performance.now();
+  const time_now = () => performance.now() / 1000;
   let acc = 0;
   const STEP = 1 / 60;
   let fps = 60, fpsT = 0, fpsN = 0, showFps = new URLSearchParams(location.search).has('debug');
@@ -41,6 +46,7 @@
       steps++;
     }
     // note: edge flags are consumed per-update above, not per-render frame
+    if (G.IS3D && G.R3.ready) { G.R3.sync(game, time_now()); G.R3.render(); }
     game.draw(ctx);
 
     // fps meter
