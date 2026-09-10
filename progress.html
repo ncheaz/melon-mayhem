@@ -31,8 +31,30 @@
 <meta http-equiv="refresh" content="15">
 </head>
 <body>
-  <div class="live">LIVE PROGRESS — 3D RENDER REFACTOR, UPDATED AS IT EVOLVES</div>
-  <h1>Melon Mayhem — Real 3D: Tilted Perspective Camera · Polygon Characters · Physical Projectiles</h1>
+  <div class="live">LIVE PROGRESS — GAMEPLAY GAUNTLET 2, UPDATED AS IT EVOLVES</div>
+  <h1>Melon Mayhem — Gameplay Pass: Angle+Power Ballistics · Zoomed Field · Sunset Horizon · Difficulty Tiers</h1>
+  <div class="sub">Builder/critic gauntlet on real browser gameplay · <span class="bar">Bar: Bloons TD 6 (shots/ref_btd6/*.jpg, blind A/B, labels stripped)</span> · all mechanics probe-verified</div>
+
+  <div class="card good">
+    <h3>GAUNTLET 2 — gameplay rework (2026-09-09) — SHIPPED</h3>
+    <div class="note">
+      <ul>
+        <li><b>Real ballistics:</b> <code>G.shotCalc(thetaDeg, speed)</code> — true parabola from launch height 2 under g=19, no clamps. <code>G.landTime()</code> shared by the aim preview, landing ring and flight.</li>
+        <li><b>AIM:</b> mouse X across the board maps linearly to launch angle <b>10°..80°</b> (probed: 10 / 45 / 80 exact). Angle is the range lever: 10° full power reaches u≈9.9, 80° lobs short and steep.</li>
+        <li><b>POWER:</b> held input ramps charge 0→1 over 1.1s (speed 5→16 wu/s), <b>dwell at MAX 0.5s</b>, then resets to 0 and re-ramps (probed: 0.5 @550ms, 1.0 @1.1s, holds through dwell, 0.03 @1.66s, 0.21 @1.86s). Bar pulses white + "MAX!" during the dwell beat.</li>
+        <li><b>Aim UI:</b> preview now draws the FULL arc launch→landing; apex diamond on-screen only; exact landing ring + "even farther" chevron; HIGH ARC x2 keys off crest ≥ 4u (probe: 80° full power → land u 4.91 vs predicted 4.94).</li>
+        <li><b>Field zoom (grid stays 4×10):</b> colW 88→100, lane pitch 84→120px, board spans x≈173..1173 of 1280 — slim margins only. 2D bake and 3D rig both re-derived.</li>
+        <li><b>Sunset horizon:</b> 3D camera re-solved (fov 30, cam (0,66,116)→lookAt (0,6,-2), pitch ≈27°) — numeric grid search over laneY targets + sky-band size. New sunset backdrop plane (painted so the sunset sits in the actually-visible slice), low hill silhouettes, in-band clouds. 2D flat mode got the matching dusk strip (y 0..152).</li>
+        <li><b>Trees clear of the board:</b> 2D trees relocated to the outside margins (canopies over house/graveyard corners, never over the lawn); 3D hedge lowered + pushed behind the fence.</li>
+        <li><b>Difficulty tiers:</b> VERY EASY / EASY / HARD (menu buttons or keys 1/2/3) scaling wave count ×0.6/×0.8/×1.4, zombie speed ÷0.65/÷0.85/×1.30, spawn interval (probed: 4 vs 8 toSpawn, 0.69 vs 0.35 s/col). Banner + HUD show the tier.</li>
+        <li><b>Iron cap 5→15:</b> two-row HUD shell rack; glory kills forge up to 15 (probed: at 15 stays 15).</li>
+        <li><b>Critic verdicts (blind):</b> aim-legibility — OURS "no contest"; sunset-horizon treatment — OURS (BTD6's mech wall "fails the brief"); overall asset density — BTD6 still wins (shipped art pipeline; honest stop per the GAUNTLET-1 gate). Fixed named gaps: hint-bar clipping, mid-field lawn variation, sky banding/clouds.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="live" style="margin-top:26px">PREVIOUS — 3D RENDER REFACTOR (GAUNTLET 1)</div>
+  <h1 style="font-size:24px">Real 3D: Tilted Perspective Camera · Polygon Characters · Physical Projectiles</h1>
   <div class="sub">Builder/critic gauntlet on real browser gameplay · <span class="bar">Bar: Bloons TD 6 (shots/ref_btd6/*.jpg, blind A/B, labels stripped)</span> · gameplay must survive intact</div>
 
   <div class="card good">

@@ -24,9 +24,13 @@
     if (e.key.toLowerCase() === 'f') showFps = !showFps;
   });
 
-  // menu: click to start
+  // menu: click to start (the difficulty picker consumes its own clicks)
   canvas.addEventListener('mousedown', e => {
     if (game.state === 'menu' && e.button === 0) {
+      const r = canvas.getBoundingClientRect();
+      const mx = (e.clientX - r.left) * (canvas.width / r.width);
+      const my = (e.clientY - r.top) * (canvas.height / r.height);
+      if (game.menuClick(mx, my)) return;
       G.Audio.uiClick();
       game.start(1);
     }

@@ -33,7 +33,10 @@ html, body {
 #game { background: transparent; }
 #hint {
   color: #9fd6a8;
-  font-size: 13px;
-  letter-spacing: .4px;
+  font-size: 12px;
+  letter-spacing: .3px;
   user-select: none;
+  max-width: 94vw;
+  text-align: center;
+  line-height: 1.5;
 }

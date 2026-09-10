@@ -9,10 +9,13 @@
 
   // Fixed vertical rail for the pult at the left edge of the field.
   // Hopping lanes (W/S) changes ONLY y/scale — the drawn x must never move.
-  // 236 = colX(r,0) in EVERY lane now (uniform row scale: colX is
-  // row-independent), so the rail sits exactly on the leftmost square of
+  // 208 = colX(r,0) − 10 in EVERY lane (uniform row scale: colX is
+  // row-independent), so the rail sits just left of the leftmost square of
   // whichever lane the pult occupies, between the house (x<172) and column 0.
-  const PULT_RAIL_X = 236;
+  const PULT_RAIL_X = 208;
+
+  // Iron munition cap. Glory kills forge shells up to this stockpile.
+  const IRON_MAX = 15;
 
   // Rail anchor for overlay FX & probes. In 3D the perspective makes
   // colX(row,0) row-dependent — always derive from the live projection;
@@ -21,12 +24,22 @@
     return G.IS3D ? G.Board.colX(row, 0) : PULT_RAIL_X;
   }
 
-  // HIGH ARC threshold, in units of apex HEIGHT: ANY hit delivered from an
-  // arc that crests at/above this counts as TWO hits (every damage popup from
-  // that shot gets ' x2'). Half the apex ceiling (Board.maxApexH = 10),
-  // ≈ 2.9× a tombstone's top (1.75u). Game.highArcH() exposes it; Projectile
-  // keys its highArc flag off it — single source of truth.
-  const HIGH_ARC_H = 5.0;
+  // HIGH ARC threshold, in units of apex HEIGHT above the ground: ANY hit
+  // delivered from an arc that crests at/above this counts as TWO hits
+  // (every damage popup from that shot gets ' x2'). With real ballistics a
+  // 4.0u crest clears a tombstone (1.75u) 2.3× and is reachable from ~⅔ bar
+  // at 45° — a meaningful, attainable skill target. Game.highArcH() exposes
+  // it; Projectile keys its highArc flag off it — single source of truth.
+  const HIGH_ARC_H = 4.0;
+  G.HIGH_ARC_H = HIGH_ARC_H;   // exposed for Projectile (same module, later use)
+
+  // Difficulty tiers. count scales wave size, speed scales how fast zombies
+  // advance (seconds-per-column shrinks), interval scales spawn gaps.
+  G.DIFFS = {
+    veryeasy: { label: 'VERY EASY', key: '1', count: 0.6, speed: 0.65, interval: 1.35, color: '#8ee05c' },
+    easy:     { label: 'EASY',      key: '2', count: 0.8, speed: 0.85, interval: 1.15, color: '#ffd23f' },
+    hard:     { label: 'HARD',      key: '3', count: 1.4, speed: 1.30, interval: 0.8,  color: '#ff5555' },
+  };
 
   // Pult-only depth cue: mild extra scale response by lane, stacked on top of
   // Board.scale() for the pult sprite, its shadow and rail dust FX ONLY.
@@ -108,18 +121,17 @@
   /* ================= Projectile ================= */
   class Projectile {
     constructor(row, u0, opts) {
-      // opts: { apexU, force, heavy }
+      // opts: { thetaDeg, speed, heavy }
       const B = G.Board;
       this.row = row;
       this.u = u0; this.h = 2.0;
-      const sc = G.shotCalc(opts.apexU - u0, opts.force, opts.heavy);
+      const sc = G.shotCalc(opts.thetaDeg, opts.speed);
       this.vu = sc.vu;
       this.vh = sc.vh;
       this.launchDeg = sc.deg;
-      // HIGH ARC rule (replaces the old force>0.607 'plunge' key): a shot is
-      // x2 when its arc APEX clears HIGH_ARC_H — apex height is the skill
-      // lever, so the same charge reads x2 up close but not aimed far.
-      this.highArc = !opts.heavy && sc.H >= HIGH_ARC_H;
+      // HIGH ARC rule: a shot is x2 when its arc APEX clears HIGH_ARC_H —
+      // steep angles + strong power crest high; flat fast shots skim.
+      this.highArc = !opts.heavy && sc.H >= G.HIGH_ARC_H;
       this.heavy = !!opts.heavy;
       this.hitsDone = 0;
       this.spin = 0;
@@ -234,11 +246,11 @@
         game.groundImpact(this);
         this.dead = true;
       }
-      if (this.u > 12 || this.u < -3) {
+      if (this.u > G.Board.COLS + 0.6 || this.u < -3) {
         // sailed off the field — still owes the player a MISS read
         if (this.hitsDone === 0 && !this.heavy && this.vh < 0) {
           const B2 = G.Board;
-          const ex = B2.colX(this.row, clamp(this.u, -1, 11.6));
+          const ex = B2.colX(this.row, clamp(this.u, -1, G.Board.COLS + 0.4));
           G.Audio.missPoof();
           game.addPopup(ex, B2.laneY[this.row] - 46, 'MISS', '#f0f0f0', 26);
           game.combo = 0;
@@ -287,7 +299,7 @@
   /* ================= Zombie ================= */
   let ZID = 0;
   class Zombie {
-    constructor(row, type, stage) {
+    constructor(row, type, stage, speedMult = 1) {
       this.id = ++ZID;
       this.row = row;
       this.u = 9.4 + rand(0, 0.3);
@@ -297,12 +309,13 @@
       this.hp = this.maxHp;
       this.shield = type === 'shieldy';
       this.shieldHits = 5;
+      this.speedMult = speedMult;   // difficulty: how fast this zombie advances
       this.helmet = type === 'bucket';
       this.dents = 0;
       this.bodyJostle = 0;
       this.state = 'spawn'; // spawn | hold | walk | kneel | die | glorydie
       this.t = 0;                 // state timer
-      this.holdDur = type === 'runner' ? 1.6 : 3.2;
+      this.holdDur = (type === 'runner' ? 1.6 : 3.2) / speedMult;
       this.walkPhase = rand(0, 6);
       this.hitFlash = 0;
       this.dieT = 0;
@@ -314,7 +327,7 @@
       this.shieldWobble = 0;
       this.gloryReady = false;
     }
-    get speed() { return this.type === 'runner' ? 0.68 : 0.45; } // seconds per column
+    get speed() { return (this.type === 'runner' ? 0.68 : 0.45) / this.speedMult; } // seconds per column
     update(dt, game) {
       this.hitFlash = Math.max(0, this.hitFlash - dt * 5);
       this.helmetWobble *= 1 - 6 * dt;
@@ -440,15 +453,14 @@
   /* ================= Pult ================= */
   class Pult {
     constructor() {
-      this.row = 2; // lower-middle of 4 lanes
+      this.row = 2; // middle of 4 lanes
       this.jumpT = 1; this.jumpFrom = 2; this.jumpTo = 2;
       this.charge = 0; this.charging = false;
-      this.chargeUp = true;
+      this.dwellT = 0;       // seconds spent parked at MAX (0.5s before reset)
       this.recoil = 0;
       this.armSwing = 0;
       this.lastQ = -1;
-      this.chargePhase = 0;  // 0→1 per half-cycle of the charge oscillation
-      this.chargeTopGlow = 0; // brief fade cue when the bar turns around at max
+      this.chargeTopGlow = 0; // flash cue when the bar hits MAX (and while it dwells)
       this.blinkT = rand(2, 4);
       this.blink = 0;
       this.hopY = 0;
@@ -493,23 +505,21 @@
       this.recoil = Math.max(0, this.recoil - dt * 4);
       this.armSwing = Math.max(0, this.armSwing - dt * 7);
       this.landSquash = Math.max(0, this.landSquash - dt * 6.7); // ~0.15s decay
-      // charge — one smooth cosine oscillation while held: up…down…up, forever.
-      // Each half-cycle is a cosine ease, so charge sweeps out of 0, eases into
-      // 1.0, touches it for an instant only, and immediately descends — zero
-      // dwell at max, no stall, no wrap. Pace unchanged: 0.85s up, 0.85s down.
+      // charge — power RAMPS while held (G.POWER.rampT to full), then DWELLS
+      // at max for G.POWER.dwellT (0.5s), then RESETS to zero and climbs
+      // again. One-way ramp: no oscillation, the dwell beat is the rhythm.
       if (this.charging) {
-        this.chargePhase += dt / 0.85;
-        if (this.chargePhase >= 1) {
-          this.chargePhase -= 1;
-          if (this.chargeUp) { this.chargeUp = false; this.chargeTopGlow = 1; G.Audio.chargeTop(); } // peaked — turn around
-          else this.chargeUp = true; // bottomed out — rise again
+        const P = G.POWER;
+        if (this.charge < 1) {
+          this.charge = Math.min(1, this.charge + dt / P.rampT);
+          if (this.charge >= 1) { this.chargeTopGlow = 1; G.Audio.chargeTop(); } // hit MAX
+          const q = Math.floor(this.charge * 10);
+          if (q !== this.lastQ) { this.lastQ = q; G.Audio.chargeTick(this.charge); }
+        } else {
+          this.chargeTopGlow = Math.max(this.chargeTopGlow, 0.6); // stay lit through the dwell
+          this.dwellT += dt;
+          if (this.dwellT >= P.dwellT) { this.dwellT = 0; this.charge = 0; this.lastQ = -1; } // wrap to zero
         }
-        const ph = Math.min(this.chargePhase, 1);
-        const c = (1 - Math.cos(ph * Math.PI)) / 2;
-        this.charge = this.chargeUp ? c : 1 - c;
-        // charge ticks
-        const q = Math.floor(this.charge * 10);
-        if (q !== this.lastQ) { this.lastQ = q; G.Audio.chargeTick(this.charge); }
       }
     }
     startJump(to, game) {
@@ -517,8 +527,8 @@
       this.jumpFrom = this.row;
       this.jumpTo = to;
       this.jumpT = 0;
-      this.charging = false; this.charge = 0;
-      this.chargePhase = 0; this.chargeUp = true; this.chargeTopGlow = 0;
+      this.charging = false; this.charge = 0; this.dwellT = 0;
+      this.chargeTopGlow = 0;
       // takeoff: dust poof + loose soil/leaf chunks kicked off the pot
       const B = G.Board;
       const railX = pultRailX(this.row);
@@ -618,6 +628,8 @@
       this.menuT = 0;
     }
     reset() {
+      this.diffKey = this.diffKey || 'easy';          // difficulty persists across retries
+      this.diff = G.DIFFS[this.diffKey];
       this.pult = new Pult();
       this.zombies = [];
       this.projectiles = [];
@@ -650,9 +662,10 @@
       this.stageStats = { kills: 0, glory: 0 };
       this.tips = [
         'W/S hop the pult along the left rail · lanes only, no side-steps.',
-        'The meter swings up, then back down — release at the top for max power.',
-        'High arcs sail over tombstones AND score x2 — lob high, harvest double.',
-        'Head-hits kneel · finish the kneeler for a glory kill · glory forges iron.',
+        'Hold LMB — power climbs, parks at MAX for half a beat, then restarts at zero.',
+        'Mouse X sets the angle, 10° flat to 80° steep — the ground ring is your landing spot.',
+        'High arcs crest high, sail over shields AND score x2 — lob high, harvest double.',
+        'Head-hits kneel · finish the kneeler for a glory kill · glory forges iron (cap 15).',
       ];
     }
 
@@ -667,10 +680,11 @@
     startWave(n) {
       this.wave = n;
       const S = this.stage;
-      this.toSpawn = 3 + S + n * 2;
+      const D = this.diff;
+      this.toSpawn = Math.max(1, Math.round((3 + S + n * 2) * D.count));
       this.spawnTimer = 0.8;
       this.waveState = 'spawning';
-      this.showBanner(`STAGE ${S} — WAVE ${n}`);
+      this.showBanner(`STAGE ${S} — WAVE ${n} · ${D.label}`);
       G.Audio.waveHorn();
       if (n === 1 && S >= 2) this.placeObstacles();
     }
@@ -688,13 +702,36 @@
     }
     showBanner(txt) { this.banner = txt; this.bannerT = 0; }
 
+    /* ---------- difficulty ---------- */
+    diffButtons() {
+      // shared by drawMenu (render) and menuClick (hit test) — one source
+      return ['veryeasy', 'easy', 'hard'].map((k, i) => ({ key: k, x: 310 + i * 230, y: 292, w: 200, h: 60 }));
+    }
+    setDifficulty(key) {
+      if (!G.DIFFS[key]) return;
+      this.diffKey = key;
+      this.diff = G.DIFFS[key];
+      G.Audio.uiClick();
+    }
+    // returns true when the click was consumed by the picker
+    menuClick(mx, my) {
+      if (this.state !== 'menu') return false;
+      for (const b of this.diffButtons()) {
+        if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
+          this.setDifficulty(b.key);
+          return true;
+        }
+      }
+      return false;
+    }
+
     /* ---------- spawning ---------- */
     updateSpawns(dt) {
       if (this.waveState === 'spawning') {
         this.spawnTimer -= dt;
         if (this.spawnTimer <= 0 && this.toSpawn > 0) {
           this.toSpawn--;
-          this.spawnTimer = Math.max(0.7, 2.4 - this.stage * 0.15 - this.wave * 0.1);
+          this.spawnTimer = Math.max(0.7 * this.diff.interval, (2.4 - this.stage * 0.15 - this.wave * 0.1) * this.diff.interval);
           this.spawnZombie();
         }
         if (this.toSpawn <= 0) this.waveState = 'clearing';
@@ -721,7 +758,7 @@
       let row = randi(0, G.Board.ROWS - 1);
       // slight bias toward pult's row for pressure
       if (Math.random() < 0.3) row = this.pult.row;
-      this.zombies.push(new Zombie(row, type, this.stage));
+      this.zombies.push(new Zombie(row, type, this.stage, this.diff.speed));
     }
     stageClear() {
       this.state = 'stageClear';
@@ -760,22 +797,22 @@
       const inp = this.input;
       const canAct = p.jumpT >= 1;
       if (canAct && inp.lmb && !p.charging) {
-        p.charging = true; p.charge = 0; p.chargeUp = true; p.chargePhase = 0; p.chargeTopGlow = 0; p.lastQ = -1;
+        p.charging = true; p.charge = 0; p.dwellT = 0; p.chargeTopGlow = 0; p.lastQ = -1;
       }
       if (p.charging) {
         if (!inp.lmb) {
-          // release → fire
+          // release → fire at the CURRENT charge (speed) and aimed angle
           p.charging = false;
-          this.fire(p.charge, false);
-          p.charge = 0;
+          this.fire(this.aimThetaDeg(), this.powerSpeed(p.charge), false);
+          p.charge = 0; p.dwellT = 0;
         }
       }
       if (canAct && inp.rmbPressed) {
         if (this.ammo > 0) {
           this.ammo--;
-          p.charging = false; p.charge = 0; // heavy shot cancels charge
-          p.chargePhase = 0; p.chargeUp = true; p.chargeTopGlow = 0;
-          this.fire(this.aimForceSuggestion(), true);
+          p.charging = false; p.charge = 0; p.dwellT = 0; // heavy shot cancels charge
+          p.chargeTopGlow = 0;
+          this.fire(this.aimThetaDeg(), 15, true); // iron shell: flat fast strike
           p.recoil = 1.4; p.armSwing = 1;
         } else {
           this.addPopupScreen(this.input.mx, this.input.my - 20, 'NO IRON!', '#ff8080', 18);
@@ -783,25 +820,28 @@
         }
       }
     }
-    aimForceSuggestion() {
-      // sensible default arc for heavy: apex at mouse
-      return 0.45;
-    }
-    apexUFromMouse() {
+    // AIM — mouse X across the board maps to launch angle 10°..80°.
+    aimThetaDeg() {
       const B = G.Board;
-      const r = this.pult.row;
-      return clamp(B.toU(r, this.input.mx), B.pultU + 1.2, 11);
+      const x0 = B.colX(this.pult.row, 0);
+      const u = clamp((this.input.mx - x0) / B.colW, 0, B.COLS);
+      return G.ANGLE_MIN + (u / B.COLS) * (G.ANGLE_MAX - G.ANGLE_MIN);
     }
+    // POWER — charge 0..1 maps to launch speed vMin..vMax.
+    powerSpeed(c) { const P = G.POWER; return P.vMin + (P.vMax - P.vMin) * clamp(c, 0, 1); }
     // Apex-height threshold for the x2 rule (see HIGH_ARC_H).
     highArcH() { return HIGH_ARC_H; }
-    // Minimal charge (0..1) whose apex reaches highArcH() at aimed distance d.
-    // Inverting shotCalc's unclamped H = ½·d·tan(30° + 45°·f):
-    //   fNeeded = (atan(2·H_t / d)·180/π − 30) / 45
-    // Returns null when even a full bar (75°) falls short — hide the marker.
-    highArcChargeFor(d) {
-      const degNeeded = Math.atan(2 * HIGH_ARC_H / Math.max(0.8, d)) * 180 / Math.PI;
-      const f = (degNeeded - 30) / 45;
-      return f > 1 ? null : clamp(f, 0, 1);
+    // Minimal charge (0..1) whose launch speed gives an apex of highArcH()
+    // at launch angle thetaDeg: H = 2 + (v·sinθ)²/2g ≥ HIGH_ARC_H
+    //   →  v ≥ √(2g(HIGH_ARC_H−2)) / sinθ  →  c = (v − vMin)/(vMax − vMin)
+    // Returns null when even a full bar falls short (very flat angles) — hide marker.
+    highArcChargeFor(thetaDeg) {
+      const B = G.Board, P = G.POWER;
+      const s = Math.sin(clamp(thetaDeg, G.ANGLE_MIN, G.ANGLE_MAX) * Math.PI / 180);
+      if (s < 0.05) return null;
+      const v = Math.sqrt(2 * B.gravity * (HIGH_ARC_H - 2)) / s;
+      const c = (v - P.vMin) / (P.vMax - P.vMin);
+      return c > 1 ? null : clamp(c, 0, 1);
     }
     // Screen-space position of the melon exactly as G.Sprites.drawPult paints
     // the held/scoop melon for a given pose. Mirrors the sprite transform
@@ -827,11 +867,9 @@
         y: B.laneY[p.row] - p.hopY + s * (py * sqy),
       };
     }
-    fire(force, heavy) {
+    fire(thetaDeg, speed, heavy) {
       const B = G.Board;
       const p = this.pult;
-      const apexU = this.apexUFromMouse();
-      const d = Math.max(0.8, apexU - B.pultU);
       // Spawn at the drawn arm tip using the pose the pult renders on THIS
       // frame (post-release: charge 0, armSwing 1, recoil 1) → the melon's
       // first frame continues visually from the scoop. Args are passed
@@ -845,7 +883,7 @@
       } else {
         tip = this.pultMelonScreen(p, 0, 1, 1);
       }
-      const pr = new Projectile(p.row, B.pultU, { apexU, force, heavy, launchSx: tip.x, launchSy: tip.y });
+      const pr = new Projectile(p.row, B.pultU, { thetaDeg, speed, heavy, launchSx: tip.x, launchSy: tip.y });
       if (tip3D) {
         pr._tip3D = tip3D;
         // control point continues the release throw direction (up-right)
@@ -855,8 +893,9 @@
       this.projectiles.push(pr);
       p.recoil = 1; p.armSwing = 1; p.holding = false;
       setTimeout(() => { p.holding = true; }, 420);
-      heavy ? G.Audio.heavyShoot() : G.Audio.shoot(force);
-      this.camera.kick(heavy ? 9 : 3.5 + force * 3);
+      const pw = clamp((speed - G.POWER.vMin) / (G.POWER.vMax - G.POWER.vMin), 0, 1);
+      heavy ? G.Audio.heavyShoot() : G.Audio.shoot(pw);
+      this.camera.kick(heavy ? 9 : 3 + pw * 3.5);
       // muzzle leaves — anchored to the fixed rail, pult-lane scale
       const sc = B.scale(p.row) * pultLaneScale(p.row);
       const sx = pultRailX(p.row) + 40 * sc;
@@ -1002,7 +1041,7 @@
         z.state = 'glorydie';
         z.dieT = 0;
         this.stageStats.glory++;
-        this.ammo = Math.min(5, this.ammo + 1);
+        this.ammo = Math.min(IRON_MAX, this.ammo + 1);
         this.score += Math.floor(500 * this.multiplier());
         this.slowmo = 0.5;
         this.hitstop = 0.09;
@@ -1155,6 +1194,13 @@
       }
       if (this.input.keyPressed['m']) G.Audio.toggleMute();
       if (this.input.keyPressed['r'] && this.state === 'play') this.start(this.stage);
+      // difficulty pick: buttons in the menu, or keys 1 / 2 / 3
+      if (this.state === 'menu') {
+        const kmap = { '1': 'veryeasy', '2': 'easy', '3': 'hard' };
+        for (const k in kmap) {
+          if (this.input.keyPressed[k]) { this.setDifficulty(kmap[k]); }
+        }
+      }
       if (this.paused && this.state === 'play') return;
       // slow-mo & hitstop
       let dt = rawDt;
@@ -1315,69 +1361,93 @@
       const B = G.Board;
       const p = this.pult;
       if (p.charging && p.jumpT >= 1) {
-        const apexU = this.apexUFromMouse();
-        const d = Math.max(0.8, apexU - B.pultU);
-        const sc = G.shotCalc(d, p.charge, false);
-        const tApex = sc.tApex, vu = sc.vu, vh = sc.vh;
+        const thetaDeg = this.aimThetaDeg();
+        const speed = this.powerSpeed(p.charge);
+        const sc = G.shotCalc(thetaDeg, speed);
+        const g = B.gravity;
         const highArc = sc.H >= this.highArcH();
+        const col = highArc ? '#b9ff2e' : '#ffffff';
+        // REAL flight: launch at h=2, land at h=0 — solved once, shared with
+        // the projectile (G.landTime). The preview IS the flight, to landing.
+        const tLand = G.landTime(sc.vh, g, 2.0);
+        const landU = B.pultU + sc.vu * tLand;
+        const LAND_MAX = B.COLS + 0.4;         // past the board's right edge
+        const offBoard = landU > LAND_MAX;
         ctx.save();
+        // ---- trajectory preview: the true parabola, launch → landing.
+        // Steep high-power shots crest above the frame and clip naturally.
         ctx.strokeStyle = highArc ? 'rgba(185,255,46,0.85)' : 'rgba(255,255,255,0.55)';
         ctx.lineWidth = 2.5;
         ctx.setLineDash([4, 9]);
         ctx.beginPath();
-        // preview rises to the APEX only — judging the descent is the skill
-        for (let t = 0; t <= tApex; t += 0.035) {
-          const u = B.pultU + vu * t;
-          const h = vh * t - 0.5 * B.gravity * t * t;
+        for (let t = 0; t <= tLand; t += 0.03) {
+          const u = B.pultU + sc.vu * t;
+          const h = 2 + sc.vh * t - 0.5 * g * t * t;
           const sx = B.colX(p.row, u);
           const sy = B.laneY[p.row] - B.heightPx(p.row, Math.max(0, h));
           t === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
         }
         ctx.stroke();
         ctx.setLineDash([]);
-        // apex marker — aims the arc's crest, never the answer (landing).
-        // At the raised ceiling (Board.maxApexH = 10) far-lane apexes still
-        // leave the canvas (row 0: 306 − 10·38·0.86 ≈ −21), so once the true apex
-        // would tuck behind the fence the marker clamps to a sky rail: a
-        // small up-chevron at the apex column + a faint dotted drop-line
-        // marking that column. The dotted preview above still runs to the
-        // true (off-screen) apex and clips naturally at the canvas edge.
-        const apexX = B.colX(p.row, clamp(apexU, B.pultU, 11.2));
+        // ---- apex diamond, only while the crest is on-screen
+        const apexX = B.colX(p.row, B.pultU + sc.vu * sc.tApex);
         const apexY = B.laneY[p.row] - B.heightPx(p.row, sc.H) - 14 * B.scale(p.row);
-        const APEX_RAIL_Y = 60;             // sky rail: floats just over the fence pickets (top y=70)
-        const RAIL_AT_Y = APEX_RAIL_Y + 10; // true apex at/above this -> rail mode
-        const onRail = apexY <= RAIL_AT_Y;
-        ctx.save();
-        ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = highArc ? '#b9ff2e' : '#ffffff';
-        ctx.lineWidth = 2.5;
-        if (onRail) {
-          // up-chevron on the rail
-          ctx.beginPath();
-          ctx.moveTo(apexX - 8, APEX_RAIL_Y + 4); ctx.lineTo(apexX, APEX_RAIL_Y - 5);
-          ctx.lineTo(apexX + 8, APEX_RAIL_Y + 4);
-          ctx.stroke();
-          // faint dotted drop-line down the predicted apex column
-          ctx.globalAlpha = 0.28;
-          ctx.lineWidth = 2;
-          ctx.setLineDash([3, 7]);
-          ctx.beginPath();
-          ctx.moveTo(apexX, APEX_RAIL_Y + 12); ctx.lineTo(apexX, APEX_RAIL_Y + 62);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        } else {
+        if (apexY > 30) {
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.moveTo(apexX, apexY - 7); ctx.lineTo(apexX + 7, apexY);
           ctx.lineTo(apexX, apexY + 7); ctx.lineTo(apexX - 7, apexY);
           ctx.closePath(); ctx.stroke();
+          ctx.restore();
+        }
+        // ---- LANDING SPOT ring — where THIS shot actually touches down.
+        // h(t) = 2 + vh·t − ½g·t² solved for h=0: exact for every
+        // angle/power combination, same physics as Projectile.update.
+        {
+          const lx = B.colX(p.row, clamp(landU, 0.2, LAND_MAX));
+          const ls = B.scale(p.row);
+          const ly = B.laneY[p.row] + 4 * ls;  // on the lane ground line
+          ctx.save();
+          ctx.strokeStyle = col;
+          ctx.fillStyle = col;
+          ctx.lineWidth = 2.5;
+          ctx.globalAlpha = 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(performance.now() / 150));
+          // squashed ellipse reads as a mark painted on the ground
+          ctx.beginPath();
+          ctx.ellipse(lx, ly, 17 * ls, 6 * ls, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          // center dot + side ticks
+          ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.arc(lx, ly, 2.6 * ls, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(lx - 25 * ls, ly); ctx.lineTo(lx - 19 * ls, ly);
+          ctx.moveTo(lx + 19 * ls, ly); ctx.lineTo(lx + 25 * ls, ly);
+          ctx.stroke();
+          // landing beyond the board — chevron says "even farther"
+          if (offBoard) {
+            ctx.globalAlpha = 0.7;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(lx + 28 * ls, ly - 5 * ls); ctx.lineTo(lx + 34 * ls, ly);
+            ctx.lineTo(lx + 28 * ls, ly + 5 * ls);
+            ctx.stroke();
+          }
+          ctx.restore();
         }
         ctx.restore();
-        ctx.restore();
         if (highArc) {
-          // smooth pulse, no strobe
+          // smooth pulse, no strobe — label rides the arc's visible crest
+          const labelX = clamp(apexX, 130, 1150);
+          const labelY = Math.max(44, Math.min(apexY, B.laneY[p.row] - 70));
           ctx.save();
           ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() / 130);
-          G.outlinedText(ctx, 'HIGH ARC x2', apexX, onRail ? APEX_RAIL_Y - 16 : apexY - 22, 16, '#b9ff2e');
+          G.outlinedText(ctx, 'HIGH ARC x2', labelX, labelY, 16, '#b9ff2e');
           ctx.restore();
         }
       } else if (p.jumpT >= 1) {
@@ -1396,9 +1466,10 @@
       ctx.restore();
       G.outlinedText(ctx, 'SCORE', 140, 74, 14, '#cfe8c2');
       G.outlinedText(ctx, `HI ${this.highScore}`, 140, 96, 15, '#ffd23f');
-      // stage / wave
+      // stage / wave / difficulty
       G.outlinedText(ctx, `STAGE ${this.stage}`, 1130, 40, 22, '#ffffff', 'center');
       G.outlinedText(ctx, `WAVE ${this.wave}/4`, 1130, 64, 16, '#cfe8c2', 'center');
+      G.outlinedText(ctx, this.diff.label, 1130, 88, 15, this.diff.color, 'center');
       // combo
       if (this.combo >= 2) {
         const mult = this.multiplier();
@@ -1407,56 +1478,57 @@
         ctx.fillStyle = `rgba(255,210,63,${a})`;
         ctx.fillRect(640 - 60 * a, 58, 120 * a, 4);
       }
-      // ammo icons (bottom-left) with count
-      for (let i = 0; i < 5; i++) {
-        const x = 46 + i * 44, y = 662;
+      // ammo icons (bottom-left): 8 per row, up to 15 shells forged
+      for (let i = 0; i < IRON_MAX; i++) {
+        const col = i % 8, row = Math.floor(i / 8);
+        const x = 46 + col * 36, y = 650 + row * 34;
         ctx.save();
-        ctx.globalAlpha = i < this.ammo ? 1 : 0.22;
+        ctx.globalAlpha = i < this.ammo ? 1 : 0.18;
         ctx.translate(x, y);
-        G.Sprites.drawMelon(ctx, 15, 0, true, 0);
+        G.Sprites.drawMelon(ctx, 13, 0, true, 0);
         ctx.restore();
       }
-      G.outlinedText(ctx, 'IRON', 46, 622, 15, '#cfe8c2', 'left');
-      G.outlinedText(ctx, `×${this.ammo}`, 46 + 5 * 44 - 6, 662, 22, '#ffe9a0', 'left');
-      // force bar while charging
+      G.outlinedText(ctx, 'IRON', 46, 618, 15, '#cfe8c2', 'left');
+      G.outlinedText(ctx, `×${this.ammo}`, 46 + 7 * 36 + 26, 684, 22, '#ffe9a0', 'left');
+      // power bar while charging: ramp up, DWELL at max (0.5s), reset to 0
       if (p.charging) {
         const B = G.Board;
         const bx = pultRailX(p.row) + 64 * B.scale(p.row);
-        const by = B.laneY[p.row] - 130 * B.scale(p.row);
-        const bw = 20, bh = 120 * B.scale(p.row);
+        const by = B.laneY[p.row] - 170 * B.scale(p.row);
+        const bw = 20, bh = 150 * B.scale(p.row);
         ctx.save();
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
         roundRectPath(ctx, bx - 3, by - 3, bw + 6, bh + 6, 6); ctx.fill();
+        const atMax = p.charge >= 1;
         const fh = bh * p.charge;
         const grad = ctx.createLinearGradient(0, by + bh, 0, by);
         grad.addColorStop(0, '#7ddc5f'); grad.addColorStop(0.6, '#ffd23f'); grad.addColorStop(1, '#ff5030');
         ctx.fillStyle = grad;
         roundRectPath(ctx, bx, by + bh - fh, bw, fh, 4); ctx.fill();
-        // MAX ARC ceiling tick — bar top = the apex clamp (Board.maxApexH).
-        // One notch + one 8px label teaches where the arc ceiling sits.
+        // MAX line — the top of the ramp. While dwelling, the whole bar
+        // pulses white so the 0.5s grace window reads as a beat, not a bug.
         ctx.globalAlpha = 0.55;
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(bx - 4, by + 1, bw + 8, 2);
-        G.outlinedText(ctx, 'MAX ARC', bx + bw + 12, by + 3, 8, '#ffffff', 'left');
+        G.outlinedText(ctx, 'MAX', bx + bw + 12, by + 3, 9, '#ffffff', 'left');
         ctx.globalAlpha = 1;
-        // turnaround cue: a 2px highlight rides the crest as the bar peaks and turns
-        if (p.chargeTopGlow > 0) {
+        if (atMax) {
+          ctx.globalAlpha = 0.45 + 0.4 * Math.sin(performance.now() / 60);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(bx, by + bh - fh, bw, fh);
+          ctx.globalAlpha = 1;
+          G.outlinedText(ctx, 'MAX!', bx + bw / 2, by - 14, 14, '#ffffff');
+        } else if (p.chargeTopGlow > 0) {
           ctx.globalAlpha = p.chargeTopGlow;
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(bx, by + bh - fh, bw, 2);
           ctx.globalAlpha = 1;
         }
-        // current launch angle readout — brightens toward white for a beat at the peak
-        const tg = p.chargeTopGlow;
-        const degCol = tg > 0
-          ? `rgb(255,${Math.round(233 + 22 * tg)},${Math.round(160 + 95 * tg)})`
-          : '#ffe9a0';
-        G.outlinedText(ctx, `${Math.round(30 + p.charge * 45)}°`, bx + bw / 2, by + bh + 16, 15, degCol);
-        // HIGH ARC marker — positioned for the CURRENT aim: the minimal
-        // charge whose apex clears highArcH() at the aimed distance. H grows
-        // with both distance and charge, so the line slides as you aim;
-        // hidden when even a full bar can't reach the threshold.
-        const fNeeded = this.highArcChargeFor(Math.max(0.8, this.apexUFromMouse() - B.pultU));
+        // current launch ANGLE readout — set by aim, not power
+        G.outlinedText(ctx, `${Math.round(this.aimThetaDeg())}°`, bx + bw / 2, by + bh + 16, 15, '#ffe9a0');
+        // HIGH ARC marker — the minimal charge whose speed crests highArcH()
+        // at the CURRENT aim angle; hidden when even a full bar can't get there.
+        const fNeeded = this.highArcChargeFor(this.aimThetaDeg());
         if (fNeeded != null) {
           const myy = by + bh - bh * fNeeded;
           ctx.strokeStyle = '#b9ff2e'; ctx.lineWidth = 3;
@@ -1469,7 +1541,7 @@
       if (this.stage === 1 && this.wave === 1) {
         ctx.save();
         ctx.globalAlpha = clamp(12 - this.bannerT * 0.5, 0, 1) * 0.85;
-        G.outlinedText(ctx, 'Hold LMB — power swings up & down · release to lob · HIGH ARC = x2', 640, 142, 18, '#ffffff');
+        G.outlinedText(ctx, 'Hold LMB — power ramps, dwells at MAX, then restarts · HIGH ARC = x2', 640, 142, 18, '#ffffff');
         ctx.restore();
       }
     }
@@ -1495,28 +1567,44 @@
       ctx.fillStyle = 'rgba(10,18,10,0.55)';
       ctx.fillRect(0, 0, 1280, 720);
       const bob = Math.sin(this.menuT * 2) * 8;
-      G.outlinedText(ctx, 'MELON MAYHEM', 640, 150 + bob, 84, '#8ee05c', 'center', '#1a2a10', 14);
-      G.outlinedText(ctx, 'GARDEN ARTILLERY DEFENSE', 640, 215 + bob * 0.5, 26, '#ffe9a0');
+      G.outlinedText(ctx, 'MELON MAYHEM', 640, 108 + bob, 76, '#8ee05c', 'center', '#1a2a10', 14);
+      G.outlinedText(ctx, 'GARDEN ARTILLERY DEFENSE', 640, 162 + bob * 0.5, 24, '#ffe9a0');
+      // difficulty picker
+      G.outlinedText(ctx, 'CHOOSE YOUR DEFENSE', 640, 252, 20, '#cfe8c2');
+      for (const b of this.diffButtons()) {
+        const D = G.DIFFS[b.key];
+        const sel = this.diffKey === b.key;
+        ctx.save();
+        ctx.globalAlpha = sel ? 1 : 0.6;
+        ctx.fillStyle = sel ? 'rgba(22,34,18,0.92)' : 'rgba(14,20,12,0.7)';
+        roundRectPath(ctx, b.x, b.y, b.w, b.h, 12); ctx.fill();
+        ctx.strokeStyle = sel ? D.color : 'rgba(207,232,194,0.45)';
+        ctx.lineWidth = sel ? 3.5 : 2;
+        roundRectPath(ctx, b.x, b.y, b.w, b.h, 12); ctx.stroke();
+        G.outlinedText(ctx, D.label, b.x + b.w / 2, b.y + 24, 21, sel ? D.color : '#cfe8c2');
+        G.outlinedText(ctx, b.key === 'veryeasy' ? 'few & slow' : b.key === 'hard' ? 'many & fast' : 'the garden war', b.x + b.w / 2, b.y + 46, 13, '#9fd6a8');
+        ctx.restore();
+      }
       // preview: idle pult + zombie (2D mode; 3D shows the live scene instead)
       if (!G.IS3D) {
       ctx.save();
-      ctx.translate(500, 560);
-      ctx.scale(1.4, 1.4);
+      ctx.translate(430, 655);
+      ctx.scale(1.1, 1.1);
       G.Sprites.drawPult(ctx, { squash: Math.sin(this.menuT * 2.2) * 0.04, armAng: -0.55, holding: true, charge: 0 });
       ctx.restore();
       ctx.save();
-      ctx.translate(760, 560);
-      ctx.scale(1.4, 1.4);
+      ctx.translate(850, 655);
+      ctx.scale(1.1, 1.1);
       G.Sprites.drawZombie(ctx, { pose: 'hold', walkPhase: 0, seed: 3, hitFlash: 0, shield: false, helmet: true, dents: 0, dieT: 0, type: 'shambler', kneelTimer: 0 }, this.menuT);
       ctx.restore();
       }
       const pulse = 0.75 + Math.sin(this.menuT * 4) * 0.25;
       ctx.globalAlpha = pulse;
-      G.outlinedText(ctx, 'CLICK TO DEFEND YOUR BRAIN', 640, 320, 30, '#ffffff');
+      G.outlinedText(ctx, 'CLICK TO DEFEND YOUR BRAIN', 640, 408, 28, '#ffffff');
       ctx.globalAlpha = 1;
-      G.outlinedText(ctx, 'W/S hop the left-edge rail · hold LMB — power swings, release to lob', 640, 380, 17, '#cfe8c2');
-      G.outlinedText(ctx, 'Mouse X sets the arc apex · HIGH ARC = x2 · RMB iron shell · glory kills forge iron', 640, 406, 17, '#cfe8c2');
-      G.outlinedText(ctx, 'P pause · M mute · R restart', 640, 432, 15, '#9fd6a8');
+      G.outlinedText(ctx, 'Hold LMB — power climbs, parks at MAX for half a beat, then restarts · release to lob', 640, 462, 16, '#cfe8c2');
+      G.outlinedText(ctx, 'Mouse X sets the angle 10°–80° · ground ring = landing spot · HIGH ARC = x2 · RMB iron shell · glory kills forge iron', 640, 488, 16, '#cfe8c2');
+      G.outlinedText(ctx, '1 / 2 / 3 difficulty · W/S hop lanes · P pause · M mute · R restart', 640, 514, 15, '#9fd6a8');
       ctx.restore();
     }
     drawStageClear(ctx) {

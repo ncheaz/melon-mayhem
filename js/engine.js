@@ -83,21 +83,26 @@ class Camera {
 G.Camera = Camera;
 
 /* ---------------- Board projection (near-side view) ----------------
-   4 rows x 10 cols. Row 0 = far (small), row 3 = near (large).      */
+   4 rows x 10 cols (grid unchanged). The FIELD is zoomed in: lane gaps
+   84→120 px and colW 88→100 px, so the lawn fills the frame — slim dusk-sky
+   strip on top (horizon ≈ y150), field from y≈204 down to y≈648, slim
+   foreground below. Margins stay readable, never black voids.              */
 const Board = {
   ROWS: 4, COLS: 10,
-  centerX: 640,
-  // 4x10 board viewed nearly side-on: lane gaps are uniform (84/82/82 px)
-  // and scale is uniform across rows, so lane lines are PARALLEL and column
+  centerX: 668,
+  // 4x10 board viewed nearly side-on: lane gaps are uniform (120 px) and
+  // scale is uniform across rows, so lane lines are PARALLEL and column
   // divisions NON-CONVERGING — the lawn reads as four stacked side-view
   // corridors (PvZ-style), never a floor plane seen from above.
-  laneY: [306, 390, 472, 554],
+  laneY: [246, 366, 486, 606],
   rowScale: [1.0, 1.0, 1.0, 1.0],
-  colW: 88,
+  colW: 100,
   pultU: 0.0,                   // pult sits ON the leftmost square of its lane
   pxPerHeight: 38,              // pixels per height-unit at scale 1
   gravity: 19,                  // world units / s^2
-  maxApexH: 10,                 // apex ceiling in height units (was 6.5): max charge is a dramatic lob that clears tombstones (1.75u) ~5.7× at any aim past mid-board
+  // Visual reference ceiling in height units (blob-shrink math, aim rail).
+  // REAL trajectories are no longer clamped — see shotCalc.
+  maxApexH: 14,
 
   scale(r) { return this.rowScale[r]; },
   // world u (col units, can be fractional) -> screen x for row r.
@@ -111,18 +116,35 @@ const Board = {
 G.Board = Board;
 
 /* ---------------- Ballistic shot calculator ----------------
-   Launch angle is the skill lever: force maps to 30°..75° elevation.
-   Apex height derives from angle + distance: H = ½·d·tanθ, clamped to
-   [0.8, Board.maxApexH]. Board.maxApexH is the single source of truth
-   for the ceiling — key high-arc bonuses off it, never re-derive.      */
-G.shotCalc = function (d, force, heavy) {
+   Two decoupled skill inputs, realistic projectile motion:
+     · AIM  — mouse X across the board maps to launch angle 10°..80°.
+     · POWER — held input ramps launch speed vMin→vMax (see G.POWER).
+   Flight is a true parabola under Board.gravity from launch height 2.0:
+     apex above ground  H = 2 + (v·sinθ)² / 2g
+     time to apex       tApex = v·sinθ / g
+   No clamp: angle + power alone decide the arc.                       */
+G.ANGLE_MIN = 10;
+G.ANGLE_MAX = 80;
+G.POWER = {
+  vMin: 5,       // launch speed at charge 0 (wu/s)
+  vMax: 16,      // launch speed at charge 1 (wu/s)
+  rampT: 1.1,    // seconds 0→1
+  dwellT: 0.5,   // seconds held at max before resetting to 0
+};
+G.shotCalc = function (thetaDeg, speed) {
   const B = G.Board;
-  d = Math.max(0.8, d);
-  const deg = heavy ? 48 : 30 + force * 45; // launch angle, clamped at 75°
-  const theta = deg * Math.PI / 180;
-  const H = Math.min(B.maxApexH, Math.max(0.8, 0.5 * d * Math.tan(theta)));
-  const tApex = Math.sqrt(2 * H / B.gravity);
-  return { H, tApex, vu: d / tApex, vh: Math.sqrt(2 * B.gravity * H), deg };
+  const th = M.clamp(thetaDeg, G.ANGLE_MIN, G.ANGLE_MAX) * Math.PI / 180;
+  const vu = speed * Math.cos(th);
+  const vh = speed * Math.sin(th);
+  const tApex = vh / B.gravity;
+  const H = 2 + vh * vh / (2 * B.gravity); // apex above GROUND (launch h=2)
+  return { vu, vh, H, tApex, deg: M.clamp(thetaDeg, G.ANGLE_MIN, G.ANGLE_MAX) };
+};
+// Time until a projectile launched at height h0 with vertical speed vh
+// returns to the ground (h=0). Single source of truth for landing rings,
+// the aim preview and the heavy-shot range solver.
+G.landTime = function (vh, g, h0) {
+  return (vh + Math.sqrt(vh * vh + 2 * g * h0)) / g;
 };
 
 /* ---------------- Misc canvas helpers ---------------- */

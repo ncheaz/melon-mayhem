@@ -21,7 +21,9 @@
   const T = THREE;
   const K = 10 / 88;                    // world units per sprite px
   const COL_W3D = 10;                   // wu per column
-  const LANE_D3D = 84 * K;              // wu between lane centrelines
+  // Deep lane pitch for the wide-lens rig: ~190 sprite-px between lane
+  // centrelines so the 4 lanes fan naturally under the ~30° camera.
+  const LANE_D3D = 190 * K;             // wu between lane centrelines
   const H3D = 38 * K;                   // wu per height-unit h
   const PX = v => v * K;                // sprite px -> world units
 
@@ -89,16 +91,21 @@
 
   /* ================= TERRAIN & BACKDROP ================= */
   function buildSky() {
+    // dusk: indigo zenith → violet → burnt orange → gold at the horizon,
+    // matching the 2D sunset strip so both render paths read as one world
     const tex = canvasTex(16, 256, (c, w, h) => {
       const g = c.createLinearGradient(0, 0, 0, h);
-      g.addColorStop(0, '#3f8fd6');
-      g.addColorStop(0.45, '#7cc0ea');
-      g.addColorStop(0.8, '#b8e0f5');
-      g.addColorStop(1, '#dff0e2');
+      g.addColorStop(0, '#3a3560');
+      g.addColorStop(0.35, '#8a4a6e');
+      g.addColorStop(0.62, '#d4695a');
+      g.addColorStop(0.85, '#f2954e');
+      g.addColorStop(1, '#ffd98a');
       c.fillStyle = g; c.fillRect(0, 0, w, h);
     });
     R3.scene.background = tex;
-    R3.scene.fog = new T.Fog(0xbfe3ee, 260, 620);
+    // telephoto rig: camera sits ~575 wu out — keep fog beyond the whole
+    // scene or everything washes to a flat silhouette
+    R3.scene.fog = new T.Fog(0xd88a6a, 900, 2200);
   }
 
   function buildLawn() {
@@ -112,6 +119,25 @@
       // mow stripes: every other column slightly lighter
       c.globalAlpha = 0.06;
       for (let u = 0; u < 10; u += 2) { c.fillStyle = '#ffffff'; c.fillRect(u * cw, 0, cw, h); }
+      c.globalAlpha = 1;
+      // worn patches + clover — quiet mid-field variation so the lawn never
+      // reads as an empty checkerboard
+      for (let i = 0; i < 9; i++) {
+        const px = Math.random() * w, py = Math.random() * h, pr = 24 + Math.random() * 46;
+        const wg = c.createRadialGradient(px, py, pr * 0.2, px, py, pr);
+        wg.addColorStop(0, 'rgba(150,120,60,0.10)');
+        wg.addColorStop(1, 'rgba(150,120,60,0)');
+        c.fillStyle = wg;
+        c.beginPath(); c.arc(px, py, pr, 0, Math.PI * 2); c.fill();
+      }
+      c.globalAlpha = 0.5;
+      for (let i = 0; i < 26; i++) {
+        const px = Math.random() * w, py = Math.random() * h;
+        c.fillStyle = Math.random() < 0.5 ? '#7cc95e' : '#8fd46a';
+        for (let b = 0; b < 3; b++) {
+          c.beginPath(); c.ellipse(px + (b - 1) * 4, py - b * 2, 3, 2, b * 0.6, 0, Math.PI * 2); c.fill();
+        }
+      }
       c.globalAlpha = 1;
       // grass blade noise
       for (let i = 0; i < 2600; i++) {
@@ -141,11 +167,64 @@
       }
     });
     mtex.wrapS = mtex.wrapT = T.RepeatWrapping; mtex.repeat.set(5, 5);
-    const meadow = new T.Mesh(new T.PlaneGeometry(560, 420), new T.MeshToonMaterial({ map: mtex, gradientMap: GRAD }));
+    // meadow ends at z ≈ −111 so the HORIZON sits inside the frame — the
+    // sunset backdrop and hills rise behind it
+    const meadow = new T.Mesh(new T.PlaneGeometry(560, 230), new T.MeshToonMaterial({ map: mtex, gradientMap: GRAD }));
     meadow.rotation.x = -Math.PI / 2;
-    meadow.position.set(0, -0.4, 0);
+    meadow.position.set(0, -0.4, 4);
     meadow.receiveShadow = true;
     R3.scene.add(meadow);
+
+    // sunset backdrop — the plane spans y −30..30 but only an ≈11 wu slice
+    // (v 0.34..0.52) sits in the visible band above the horizon, so the
+    // sunset money-shot (gold → half-set sun → pink) is painted THERE
+    const btex = canvasTex(1024, 256, (c, w, h) => {
+      const g = c.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0.00, '#2e2a55');
+      g.addColorStop(0.22, '#5e3768');
+      g.addColorStop(0.30, '#93456e');
+      g.addColorStop(0.36, '#e05a4e');
+      g.addColorStop(0.42, '#ff8a3e');
+      g.addColorStop(0.48, '#ffab4e');
+      g.addColorStop(0.52, '#ffdd9a');
+      g.addColorStop(1.00, '#ffdd9a');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+      // half-set sun disc on the horizon line (v ≈ 0.42 → sits just above it)
+      const sx = w * 0.66, sy = h * 0.42, sr = 26;
+      const sg = c.createRadialGradient(sx, sy, 4, sx, sy, sr * 3);
+      sg.addColorStop(0, 'rgba(255,244,190,1)');
+      sg.addColorStop(0.35, 'rgba(255,190,100,0.7)');
+      sg.addColorStop(1, 'rgba(255,190,100,0)');
+      c.fillStyle = sg;
+      c.beginPath(); c.arc(sx, sy, sr * 2.6, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#fff2c0';
+      c.beginPath(); c.arc(sx, sy, sr, 0, Math.PI * 2); c.fill();
+      // banded haze + painterly clouds INSIDE the visible slice (v 0.34..0.52
+      // ≈ y 87..133): two violet streaks up high, warm cloud puffs near the sun
+      c.globalAlpha = 0.35;
+      c.fillStyle = '#6a3f6e';
+      for (const [by, bh] of [[0.345, 0.018], [0.375, 0.012]]) {
+        c.beginPath(); c.ellipse(w * 0.3, h * by, w * 0.42, h * bh, 0, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.ellipse(w * 0.78, h * (by + 0.02), w * 0.3, h * bh * 0.8, 0, 0, Math.PI * 2); c.fill();
+      }
+      c.globalAlpha = 1;
+      const puff = (px, py, pr, col) => {
+        const pg = c.createRadialGradient(px - pr * 0.25, py - pr * 0.35, pr * 0.15, px, py, pr);
+        pg.addColorStop(0, col);
+        pg.addColorStop(1, 'rgba(255,200,140,0)');
+        c.fillStyle = pg;
+        c.beginPath(); c.arc(px, py, pr, 0, Math.PI * 2); c.fill();
+      };
+      puff(w * 0.14, h * 0.455, 34, 'rgba(255,214,170,0.85)');
+      puff(w * 0.19, h * 0.47, 22, 'rgba(255,230,190,0.9)');
+      puff(w * 0.44, h * 0.44, 26, 'rgba(255,220,180,0.7)');
+      puff(w * 0.86, h * 0.46, 30, 'rgba(255,224,180,0.8)');
+      puff(w * 0.9, h * 0.44, 18, 'rgba(255,240,205,0.9)');
+    });
+    const backdrop = new T.Mesh(new T.PlaneGeometry(1400, 60),
+      new T.MeshBasicMaterial({ map: btex, fog: false }));
+    backdrop.position.set(0, 0, -136);
+    R3.scene.add(backdrop);
   }
 
   function buildFence() {
@@ -228,32 +307,33 @@
   }
 
   function buildHedge() {
-    // Treeline right behind the fence — fills the top of the frame the way
-    // BTD6 fills its top edge with vegetation. Bushy sphere clusters, two
-    // tones, varied heights; a couple of taller tree clusters for rhythm.
+    // Treeline right behind the fence. Kept LOW and pushed BACK so no canopy
+    // leans over the board — shrubbery hugging the horizon, with only rare
+    // modest accents for rhythm. The silhouette sits against the sunset.
     const g = new T.Group();
     const mH1 = toon(0x2e6630), mH2 = toon(0x3a7d38), mH3 = toon(0x265426);
-    const zH = -1.5 * LANE_D3D - PX(52);
+    const zH = -1.5 * LANE_D3D - PX(96);
     let x = -COL_W3D * 5 - PX(140);
     let i = 0;
     while (x < COL_W3D * 5 + PX(190)) {
-      const h = 24 + Math.sin(i * 1.7) * 5 + Math.random() * 4;
-      const r = h * 0.42;
+      // low canopy: h ≈ 8..11 wu — below the fence-top sightline
+      const h = 8 + Math.sin(i * 1.7) * 1.6 + Math.random() * 1.4;
+      const r = h * 0.5;
       const m = [mH1, mH2, mH3][i % 3];
       const bush = new T.Group();
       const n = 3;
       for (let b = 0; b < n; b++) {
         const bx = (Math.random() - 0.5) * r * 1.2;
-        const by = h * 0.35 + Math.random() * h * 0.3;
+        const by = h * 0.4 + Math.random() * h * 0.3;
         const bz = (Math.random() - 0.5) * 3;
         const br = r * (0.7 + Math.random() * 0.5);
         const s = mesh(GEO.sphere, m, br, br * 0.85, br, bx, by, bz);
         bush.add(s);
       }
-      if (i % 5 === 2) { // taller accent tree
+      if (i % 9 === 4) { // rare modest accent tree — still well short of the board
         const th = h * 1.5;
         bush.add(mesh(GEO.cyl, toon(0x6a4a2c), 1.2, th * 0.5, 1.2, 0, th * 0.25, 0));
-        bush.add(mesh(GEO.cone, mH3, h * 0.75, th * 0.8, h * 0.75, 0, th * 0.75, 0));
+        bush.add(mesh(GEO.cone, mH3, h * 0.7, th * 0.8, h * 0.7, 0, th * 0.75, 0));
       }
       bush.position.set(x, 0, zH);
       bush.traverse(o => { if (o.isMesh) o.castShadow = true; });
@@ -331,7 +411,9 @@
   }
 
   function buildHills() {
-    // silhouette hills on alpha planes, two depths
+    // silhouette hills on alpha planes, two depths — LOW ridges that top out
+    // inside the ≈85px sky band (tops ≈ 8/4 wu above the horizon line), so
+    // sunset glow stays visible above and between them
     function hill(color, z, hgt, seed) {
       const tex = canvasTex(1024, 256, (c, w, h) => {
         c.clearRect(0, 0, w, h);
@@ -344,12 +426,12 @@
         c.lineTo(w, h); c.closePath(); c.fill();
       });
       const m = new T.Mesh(new T.PlaneGeometry(620, hgt),
-        new T.MeshBasicMaterial({ map: tex, transparent: true, fog: true }));
+        new T.MeshBasicMaterial({ map: tex, transparent: true, fog: false }));
       m.position.set(0, hgt / 2 - 6, z);
       R3.scene.add(m);
     }
-    hill('#9ecf8e', -230, 130, 1.7);
-    hill('#7cbb6c', -170, 90, 2.6);
+    hill('#9ecf8e', -128, 9, 1.7);   // tops peek ~3 wu above the horizon
+    hill('#7cbb6c', -122, 7, 2.6);
   }
 
   function buildClouds() {
@@ -368,9 +450,11 @@
     for (let i = 0; i < 7; i++) {
       const sm = new T.SpriteMaterial({ map: tex, transparent: true, opacity: 0.85, fog: true });
       const s = new T.Sprite(sm);
-      const sc = 60 + Math.random() * 70;
+      // small world-sized puffs drifting INSIDE the sky band (y 2..9 wu at
+      // z ≈ −129 — the visible horizon strip)
+      const sc = 16 + Math.random() * 20;
       s.scale.set(sc, sc * 0.45, 1);
-      s.position.set((Math.random() - 0.5) * 420, 75 + Math.random() * 55, -240 - Math.random() * 60);
+      s.position.set((Math.random() - 0.5) * 420, 2 + Math.random() * 7, -125 - Math.random() * 8);
       s.userData.speed = 1.2 + Math.random() * 1.6;
       R3.scene.add(s); R3.clouds.push(s);
     }
@@ -746,10 +830,14 @@
   R3.init = function (canvas) {
     buildSharedGeo();
     const q = new URLSearchParams(location.search);
-    const fov = parseFloat(q.get('fov')) || 44;
-    const cy = parseFloat(q.get('cy')) || 85;
-    const cz = parseFloat(q.get('cz')) || 72;
-    const ty = parseFloat(q.get('ty')) || 8;
+    // Camera framing — NUMERICALLY CALIBRATED (grid search on laneY targets
+    // + sky-band): fov 30, cam (0,66,116) → lookAt (0,6,-2), pitch ≈ 27°.
+    // Projects the 4x10 lawn to laneY≈[270,372,486,608] (rowScale fan
+    // 0.8..1.2 — PvZ-style depth cue) with a ≈100px sunset horizon band.
+    const fov = parseFloat(q.get('fov')) || 30;
+    const cy = parseFloat(q.get('cy')) || 66;
+    const cz = parseFloat(q.get('cz')) || 116;
+    const ty = parseFloat(q.get('ty')) || 6;
     const tz = parseFloat(q.get('tz')) || -2;
 
     R3.renderer = new T.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -760,21 +848,21 @@
     R3.renderer.outputEncoding = T.sRGBEncoding;
 
     R3.scene = new T.Scene();
-    R3.camera = new T.PerspectiveCamera(fov, 1280 / 720, 1, 900);
+    R3.camera = new T.PerspectiveCamera(fov, 1280 / 720, 1, 2600);
     R3.camera.position.set(0, cy, cz);
     R3.camera.lookAt(0, ty, tz);
     R3.camera.updateMatrixWorld(true);
     R3.camBase = R3.camera.position.clone();
 
-    // lights — saturated toon look: gentle fill, warm key, readable shadows
-    const hemi = new T.HemisphereLight(0xcfe8ff, 0x6a8a4e, 0.34);
+    // lights — dusk toon look: warm low sun, violet-tinted fill, readable shadows
+    const hemi = new T.HemisphereLight(0xd8b0d8, 0x5f7a48, 0.42);
     R3.scene.add(hemi);
-    const sun = new T.DirectionalLight(0xffe8c0, 1.12);
-    sun.position.set(90, 190, 110);
+    const sun = new T.DirectionalLight(0xffb87a, 1.05);
+    sun.position.set(60, 80, 90);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -70; sun.shadow.camera.right = 70;
-    sun.shadow.camera.top = 70; sun.shadow.camera.bottom = -70;
+    sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
+    sun.shadow.camera.top = 80; sun.shadow.camera.bottom = -80;
     sun.shadow.camera.near = 20; sun.shadow.camera.far = 500;
     sun.shadow.bias = -0.0008;
     R3.scene.add(sun);

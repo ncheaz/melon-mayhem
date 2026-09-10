@@ -609,39 +609,39 @@
     // base ground fill (prevents transparent holes)
     x.fillStyle = '#5f9440';
     x.fillRect(0, 0, 1280, 720);
-    // ============ SKY / HILLS / FENCE — painted depth layers (KR-style) ============
-    // Sky: deep zenith → warm horizon. Sun with glow + rays. Three cloud
-    // depth layers with shaded undersides. Two hill ranges with atmospheric
-    // perspective + treeline. Fence: shaded planks, twin rails, capped posts.
-    const sky = x.createLinearGradient(0, 0, 0, 245);
-    sky.addColorStop(0, '#4f9fd2');
-    sky.addColorStop(0.45, '#8ecfe8');
-    sky.addColorStop(0.8, '#c8e8d8');
-    sky.addColorStop(1, '#eaf4d2');
-    x.fillStyle = sky; x.fillRect(0, 0, 1280, 245);
-    // sun + glow + rays (kept clear of HUD corners; apex-rail floats below)
-    const sunX = 980, sunY = 40;
-    const sg2 = x.createRadialGradient(sunX, sunY, 8, sunX, sunY, 90);
-    sg2.addColorStop(0, 'rgba(255,244,200,0.9)');
-    sg2.addColorStop(0.4, 'rgba(255,238,170,0.45)');
-    sg2.addColorStop(1, 'rgba(255,238,170,0)');
+    // ============ SKY / HILLS / FENCE — dusk horizon over a big field ============
+    // Sunset strip (y 0..152): deep zenith → peach → gold at the horizon.
+    // Below it the zoomed-in lawn fills the frame down to y≈648.
+    const sky = x.createLinearGradient(0, 0, 0, 152);
+    sky.addColorStop(0, '#3a3560');
+    sky.addColorStop(0.35, '#8a4a6e');
+    sky.addColorStop(0.65, '#d4695a');
+    sky.addColorStop(0.87, '#f2954e');
+    sky.addColorStop(1, '#ffd98a');
+    x.fillStyle = sky; x.fillRect(0, 0, 1280, 152);
+    // setting sun half-sunk toward the horizon, warm glow + rays
+    const sunX = 1010, sunY = 116;
+    const sg2 = x.createRadialGradient(sunX, sunY, 8, sunX, sunY, 100);
+    sg2.addColorStop(0, 'rgba(255,214,140,0.95)');
+    sg2.addColorStop(0.4, 'rgba(255,178,110,0.5)');
+    sg2.addColorStop(1, 'rgba(255,178,110,0)');
     x.fillStyle = sg2;
-    x.beginPath(); x.arc(sunX, sunY, 90, 0, TAU); x.fill();
-    x.strokeStyle = 'rgba(255,232,140,0.5)'; x.lineWidth = 3; x.lineCap = 'round';
+    x.beginPath(); x.arc(sunX, sunY, 100, 0, TAU); x.fill();
+    x.strokeStyle = 'rgba(255,196,120,0.55)'; x.lineWidth = 3; x.lineCap = 'round';
     for (let i = 0; i < 12; i++) {
       const a = i / 12 * TAU + 0.26;
       x.beginPath();
-      x.moveTo(sunX + Math.cos(a) * 40, sunY + Math.sin(a) * 40);
-      x.lineTo(sunX + Math.cos(a) * (50 + (i % 2) * 7), sunY + Math.sin(a) * (50 + (i % 2) * 7));
+      x.moveTo(sunX + Math.cos(a) * 44, sunY + Math.sin(a) * 44);
+      x.lineTo(sunX + Math.cos(a) * (55 + (i % 2) * 8), sunY + Math.sin(a) * (55 + (i % 2) * 8));
       x.stroke();
     }
-    shadedEll(x, sunX, sunY, 26, 26, '#ffe9a0', '#f0b83f', '#fff6cf', '#e8a52f', 3);
-    // clouds — painterly puffs with flat shaded undersides, three depths
+    shadedEll(x, sunX, sunY, 30, 30, '#ffd98a', '#f08a3c', '#fff0c0', '#d8682f', 3);
+    // clouds — painterly puffs tinted by the sunset, three depths
     const cloud = (cx, cy, s, shade) => {
       x.save(); x.translate(cx, cy); x.scale(s, s);
       const puff = (px, py, pr) => {
         const cg = x.createRadialGradient(px - pr * 0.3, py - pr * 0.5, pr * 0.2, px, py, pr);
-        cg.addColorStop(0, '#ffffff');
+        cg.addColorStop(0, '#ffe9d8');
         cg.addColorStop(1, shade);
         x.fillStyle = cg;
         x.beginPath(); x.arc(px, py, pr, 0, TAU); x.fill();
@@ -649,95 +649,109 @@
       puff(-30, 6, 20); puff(30, 8, 18); puff(8, -10, 22); puff(-6, 4, 24);
       x.restore();
     };
-    cloud(180, 42, 0.72, '#c2dcea');   // far — small, cool
-    cloud(700, 34, 0.6, '#c2dcea');
-    cloud(1120, 66, 0.66, '#c2dcea');
-    cloud(380, 84, 1.0, '#a9c4da');    // mid
-    cloud(880, 108, 0.9, '#a9c4da');
-    cloud(120, 130, 1.15, '#93b4d0');  // near — larger, warmer shade
-    cloud(620, 148, 1.05, '#93b4d0');
-    // far hills — hazy, light (atmospheric perspective)
+    cloud(180, 36, 0.72, '#d8a0a8');   // far — small, catching pink light
+    cloud(640, 28, 0.6, '#d8a0a8');
+    cloud(1150, 58, 0.66, '#d8a0a8');
+    cloud(360, 74, 1.0, '#c4849a');    // mid
+    cloud(850, 98, 0.9, '#c4849a');
+    cloud(110, 116, 1.15, '#a86890');  // near — larger, deeper dusk shade
+    cloud(560, 124, 1.05, '#a86890');
+    // far hills — hazy, warm-tinted (atmospheric perspective), ridge ≈118..146
     {
-      const hg = x.createLinearGradient(0, 118, 0, 200);
-      hg.addColorStop(0, '#c2e0a8');
-      hg.addColorStop(1, '#a5cc88');
+      const hg = x.createLinearGradient(0, 112, 0, 152);
+      hg.addColorStop(0, '#b09078');
+      hg.addColorStop(1, '#8fa068');
       x.fillStyle = hg;
     }
     x.beginPath();
-    x.moveTo(0, 168);
-    x.quadraticCurveTo(180, 118, 380, 162);
-    x.quadraticCurveTo(560, 122, 760, 160);
-    x.quadraticCurveTo(960, 126, 1140, 158);
-    x.quadraticCurveTo(1220, 140, 1280, 156);
-    x.lineTo(1280, 200); x.lineTo(0, 200);
+    x.moveTo(0, 136);
+    x.quadraticCurveTo(180, 112, 380, 130);
+    x.quadraticCurveTo(560, 114, 760, 128);
+    x.quadraticCurveTo(960, 116, 1140, 126);
+    x.quadraticCurveTo(1220, 118, 1280, 124);
+    x.lineTo(1280, 152); x.lineTo(0, 152);
     x.closePath(); x.fill();
     // far treeline specks on the far ridge
-    x.fillStyle = '#9cc384';
-    for (const [tx, ty] of [[90, 160], [150, 152], [430, 158], [520, 150], [820, 156], [890, 149], [1180, 154]]) {
-      x.beginPath(); x.arc(tx, ty, 6, 0, TAU); x.fill();
+    x.fillStyle = '#7d8f56';
+    for (const [tx, ty] of [[90, 130], [150, 124], [430, 128], [520, 122], [820, 126], [890, 121], [1180, 124]]) {
+      x.beginPath(); x.arc(tx, ty, 4.5, 0, TAU); x.fill();
     }
-    // near hills — deeper, warmer, with tree clusters
+    // near hills — deeper, warmer, rolling straight into the lawn band
     {
-      const hg = x.createLinearGradient(0, 158, 0, 250);
-      hg.addColorStop(0, '#a2cf82');
-      hg.addColorStop(1, '#7cae60');
+      const hg = x.createLinearGradient(0, 144, 0, 204);
+      hg.addColorStop(0, '#94a862');
+      hg.addColorStop(1, '#6f9648');
       x.fillStyle = hg;
     }
     x.beginPath();
-    x.moveTo(0, 206);
-    x.quadraticCurveTo(240, 158, 480, 200);
-    x.quadraticCurveTo(640, 226, 820, 192);
-    x.quadraticCurveTo(1020, 158, 1280, 200);
-    x.lineTo(1280, 250); x.lineTo(0, 250);
+    x.moveTo(0, 172);
+    x.quadraticCurveTo(240, 146, 480, 166);
+    x.quadraticCurveTo(640, 178, 820, 160);
+    x.quadraticCurveTo(1020, 144, 1280, 166);
+    x.lineTo(1280, 204); x.lineTo(0, 204);
     x.closePath(); x.fill();
-    // tree clusters on the near ridge (shaded domes + trunk hints)
+    // Trees live ONLY in the outside margins now — never over the board.
+    // Corner clusters whose canopies rise into the sunset strip; the house
+    // and graveyard walls (drawn later) swallow their trunks so they read as
+    // deep background. The board's x-range (≈173..1173) stays 100% clear.
     const tree = (tx, ty, s) => {
       x.save(); x.translate(tx, ty); x.scale(s, s);
-      shadedEll(x, 0, 0, 11, 13, '#4f8f3e', '#2f5f2a', '#7abf60', null, 0);
-      shadedEll(x, -7, 4, 7, 8, '#4f8f3e', '#2f5f2a', '#7abf60', null, 0);
+      // trunk hint
+      x.fillStyle = '#5f4126';
+      x.fillRect(-3, 6, 6, 18);
+      // shaded dome canopy + two lobes
+      shadedEll(x, 0, 0, 15, 17, '#4f8f3e', '#2f5f2a', '#c78d52', null, 0);
+      shadedEll(x, -10, 5, 9, 10, '#4f8f3e', '#2f5f2a', '#7abf60', null, 0);
+      shadedEll(x, 9, 6, 8, 9, '#4f8f3e', '#2f5f2a', '#7abf60', null, 0);
       x.restore();
     };
-    tree(60, 208, 1); tree(78, 212, 0.8); tree(310, 198, 1.1); tree(328, 203, 0.8);
-    tree(700, 200, 1); tree(720, 205, 0.75); tree(1090, 196, 1.05); tree(1110, 201, 0.8);
-    // tiny far windmill on the near ridge (KR flavor)
+    tree(95, 122, 2.1);    // left corner — canopy peeks over the cottage roof
+    tree(150, 130, 1.4);
+    tree(1243, 120, 2.2);  // right corner — canopy peeks over the graveyard wall
+    tree(1196, 132, 1.3);
+    // low shrubs hug the fence line (bottoms ≤ y196 — never over the field)
+    for (const [sx2, ss] of [[250, 0.8], [420, 0.6], [660, 0.75], [900, 0.6], [1080, 0.8]]) {
+      shadedEll(x, sx2, 190, 12 * ss + 6, 8 * ss + 4, '#4f8f3e', '#2f5f2a', '#7abf60', null, 0);
+    }
+    // tiny far windmill on the near ridge (KR flavor) — far right corner
     x.save();
-    x.translate(940, 186);
+    x.translate(1102, 168);
     poly(x, [[-7, 0], [7, 0], [4, -22], [-4, -22]], '#c9b48a', null, 0);
     poly(x, [[-4, -22], [4, -22], [0, -32]], '#8a6a44', null, 0);
     x.strokeStyle = '#6b4f2e'; x.lineWidth = 2;
     x.beginPath(); x.moveTo(0, -26); x.lineTo(10, -22); x.moveTo(0, -26); x.lineTo(8, -32); x.moveTo(0, -26); x.lineTo(-2, -36); x.moveTo(0, -26); x.lineTo(-9, -21); x.stroke();
     x.restore();
-    // meadow band between hills and lawn (soft transition)
-    const mg = x.createLinearGradient(0, 240, 0, 264);
-    mg.addColorStop(0, '#7fb35e');
-    mg.addColorStop(1, '#9cc873');
-    x.fillStyle = mg; x.fillRect(0, 238, 1280, 26);
+    // meadow band between hills and lawn (soft transition into the fence)
+    const mg = x.createLinearGradient(0, 196, 0, 218);
+    mg.addColorStop(0, '#6f9648');
+    mg.addColorStop(1, '#8fbc66');
+    x.fillStyle = mg; x.fillRect(0, 196, 1280, 22);
     // fence line just above the board (raised clear of lane-0 actors) —
-    // shaded planks, twin rails, capped posts
-    for (let fx = 196; fx < 1140; fx += 34) {
+    // shaded planks, twin rails, capped posts, hugging the horizon
+    for (let fx = 180; fx < 1180; fx += 34) {
       const pg = x.createLinearGradient(fx, 0, fx + 9, 0);
       pg.addColorStop(0, '#b0885a');
       pg.addColorStop(0.55, '#966f42');
       pg.addColorStop(1, '#6f5230');
       x.fillStyle = pg;
-      x.fillRect(fx, 70, 9, 38);
+      x.fillRect(fx, 152, 9, 38);
       // pointed top
-      poly(x, [[fx, 70], [fx + 4.5, 64], [fx + 9, 70]], '#a37b4c', null, 0);
+      poly(x, [[fx, 152], [fx + 4.5, 146], [fx + 9, 152]], '#a37b4c', null, 0);
     }
-    for (const ry of [80, 96]) {
+    for (const ry of [162, 178]) {
       const rg = x.createLinearGradient(0, ry, 0, ry + 6);
       rg.addColorStop(0, '#a37b4c');
       rg.addColorStop(1, '#6f5230');
       x.fillStyle = rg;
-      x.fillRect(190, ry, 956, 6);
+      x.fillRect(176, ry, 1004, 6);
     }
-    for (const px2 of [186, 570, 954, 1136]) {
+    for (const px2 of [180, 520, 866, 1172]) {
       x.fillStyle = '#7c5a34';
-      x.fillRect(px2, 66, 14, 44);
+      x.fillRect(px2, 148, 14, 44);
       x.fillStyle = '#4f3a20';
-      x.fillRect(px2, 66, 14, 5);
+      x.fillRect(px2, 148, 14, 5);
       x.fillStyle = '#8f6a3e';
-      x.fillRect(px2, 71, 3, 39);
+      x.fillRect(px2, 153, 3, 39);
     }
 
     // ============ THE LAWN: four stacked side-view corridor lanes ============
@@ -805,22 +819,22 @@
       x.moveTo(x0, by + 3); x.lineTo(x1, by + 3);
       x.stroke();
     }
-    // foreground strip under the board (kept slim — near lanes dominate)
-    const fg = x.createLinearGradient(0, 623, 0, 720);
+    // foreground strip under the board (kept slim — the near lanes dominate)
+    const fg = x.createLinearGradient(0, 648, 0, 720);
     fg.addColorStop(0, '#568c3c'); fg.addColorStop(1, '#35592a');
     x.fillStyle = fg;
-    x.fillRect(0, 623, 1280, 97);
+    x.fillRect(0, 648, 1280, 72);
     // garden dressing: shaded grass tufts, pebbles, small flowers
     for (let i = 0; i < 34; i++) {
-      const tx = M.rand(0, 1280), ty = M.rand(634, 714);
+      const tx = M.rand(0, 1280), ty = M.rand(658, 712);
       poly(x, [[tx - 4, ty], [tx, ty - 12 - M.rand(0, 5)], [tx + 4, ty]], M.pick(['#4f9c46', '#468a3e', '#5aa850']), null, 0);
     }
     for (let i = 0; i < 12; i++) {
-      const px4 = M.rand(0, 1280), py4 = M.rand(640, 710), pr = M.rand(3, 6);
+      const px4 = M.rand(0, 1280), py4 = M.rand(662, 706), pr = M.rand(3, 6);
       shadedEll(x, px4, py4, pr, pr * 0.7, '#9a9484', '#6b665a', '#c2bca8', null, 0);
     }
     for (let i = 0; i < 9; i++) {
-      const fx3 = M.rand(20, 1260), fy3 = M.rand(640, 700), fc = M.pick(['#ffd23f', '#e86a7a', '#ff9c40', '#f0f0e0']);
+      const fx3 = M.rand(20, 1260), fy3 = M.rand(660, 700), fc = M.pick(['#ffd23f', '#e86a7a', '#ff9c40', '#f0f0e0']);
       x.strokeStyle = '#3f7a34'; x.lineWidth = 1.6;
       x.beginPath(); x.moveTo(fx3, fy3); x.lineTo(fx3, fy3 - 9); x.stroke();
       ell(x, fx3, fy3 - 11, 3.4, 3.4, fc, null, 0);
