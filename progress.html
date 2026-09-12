@@ -31,8 +31,434 @@
 <meta http-equiv="refresh" content="15">
 </head>
 <body>
-  <div class="live">LIVE PROGRESS — GAMEPLAY GAUNTLET 2, UPDATED AS IT EVOLVES</div>
-  <h1>Melon Mayhem — Gameplay Pass: Angle+Power Ballistics · Zoomed Field · Sunset Horizon · Difficulty Tiers</h1>
+  <div class="live">LIVE PROGRESS — SHORT GAME IS THE DEFAULT · 3-WAVE STAGES · ?short=0 = FULL CAMPAIGN</div>
+  <h1>Melon Mayhem — Gauntlet: The Don (two bosses, three phases, two celebrations)</h1>
+  <div class="sub">Every number below is probe-measured in a live run, not eyeballed · bar = South Park: The Stick of Truth boss finishers · captures in <code>shots/comedy/</code> + refs in <code>shots/ref_spt/</code></div>
+
+  <div class="card good">
+    <h3>THE GRAND FINALE — TEN MORE SECONDS OF SKY (2026-09-11, probe: <code>node probes/sendoff.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>A new <code>fwfinal</code> phase, ten full seconds between the send-off and the paper rain.</b> The chain is now roast → <code>fwshow</code> (10.5 s) → <code>fwfinal</code> (10 s) → <code>confetti</code> → end. ENTER skips straight to THE END from anywhere in the show.</li>
+        <li><b>First five seconds: the ORGANIZED PATTERN, scored beat by beat.</b> <code>buildFwPattern</code> queues every shell on a {t, fn} score fired by <code>updateFwFinal</code>: a gold wave of six peonies marching L→R, an ice wave of perfect rings marching back, three mirrored <b>crossfire</b> pairs angling in from the screen edges (shells can now be fired at an ANGLE — <code>Shell</code> grew a <code>vx</code>), a five-shell rainbow peacock fanning out of the middle, a row of three perfect rings with a white-and-gold crown over the centre, and one mirrored salvo of every burst look at once. Every beat carries its own coloured light (<code>hitFlash</code>) and its own kick.</li>
+        <li><b>New burst LOOKS</b> (shells grew a <code>style</code>): <code>ring</code> — one perfect circle, every ember the same speed; <code>willow</code> — long gold branches that hang and drip; <code>palm</code> — a dozen thick fronds that rise and sag; <code>crossette</code> — fat comets that SPLIT a beat later (the splits are queued on the phase clock and pop as their own mini-bursts). Plus the classic two-tone peony.</li>
+        <li><b>Last five seconds: the saturation.</b> The volley interval collapses 0.42 s → 0.07 s, volleys grow 2 → 10 shells, every look and colour mixes at every size, big-shell odds climb 25% → 75%, and named mega crowns land on an accelerating schedule (6.0 / 7.5 / 8.5 / 9.0 / 9.4 s) each with a flash and a kick. At 9.3 s <b>THE CLOSER</b> fires everything at once — twelve big styled shells plus two mega crowns under a 0.42 s full white-out, a <code>crashBoom</code> and a kick(22) — and the ember cap rises to <b>3400</b> to hold the extreme. Probe: max <b>73 shells / 3 371 embers</b> airborne, closer fires at t 9.7.</li>
+        <li><b>Probes:</b> <code>sendoff.js</code> walks the whole show (trigger at 360 → fwshow → pattern frozen at t 2.43 with 18 shells/1 410 embers → closer → confetti 180 → end); <code>finale.js</code>, <code>short.js</code>, <code>parade3d.js</code> re-run green (parade3d needed the extra ENTER for the good-riddance card). Zero page errors.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>THE LONG GOODBYE, STRETCHED (2026-09-11 v2, probes: <code>node probes/heli.js</code> · <code>node probes/swallow.js</code> · <code>node probes/sendoff.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The first Don's chopper crash is TWICE as far out at the horizon.</b> The flight's release/drop/rest legs moved from <code>z = -60</code> to <code>z = -120</code> (the away/back speck legs out to −150/−170 to match), and the far miniature shrank with the distance: <code>FAR_S 0.62 → 0.34</code> in 3D, <code>FAR_DS 0.62 → 0.34</code> and <code>FAR_LIFT 150 → 300 px</code> up the lawn in 2D. The far-staging ramps in both painters (<code>farK</code>/<code>fk</code>) now saturate at <code>|z| = 112</code> so the deeper drop lands on the full far stage, and the past-the-horizon gate moved to <code>|z| &gt; 140</code> so he is still SEEN hanging under the chopper when the buckle lets go. All 13 beats stay on-frame in both paths (probe-checked by projection); the wreck now burns almost at the meadow's far edge, a small bright tragedy in the middle distance.</li>
+        <li><b>The hat rant and the rug rant now linger a full TEN seconds.</b> <code>GRIPE_T 3 → 10</code> — the bubble (and his hands-up howl, which decays on the same constant) survives lane jumps and follows him the whole time, exactly as before, just far less rushable.</li>
+        <li><b>The swallow burns for TEN full seconds.</b> <code>SWALLOW_FIRE_T 5.4 → 10.0</code> (exit total now 11.1 s): the twice-a-second burps, the flame trickle, the rocks and lava arcs and the camera kicks all continue twice as long before the hole sews itself shut over him.</li>
+        <li><b>…and then the lawn says what everybody is thinking.</b> A new <code>seeya</code> celebration phase hangs a good-riddance card over the night sky for <code>SEEYA_T = 10</code> s: <b>THE DON IS <code>&lt;term&gt;</code>.</b> with the term rolled fresh every run from <code>DON_COOKED</code> (WELL DONE · EXTRA CRISPY · FULLY ROASTED · MEDIUM-RARE · CHAR-BROILED · FLAMBÉED · TOASTED · COOKED · BURNT TO A CRISP · A SMOKING CRATER · REDUCED TO ASH · A PUBLIC ROAST), a random sneer from <code>SEEYA_SUBS</code> under it, <b>GOOD RIDDANCE — SEE YA, DON!</b> in gold, embers drifting up off the sealed hole — and only then the chase starts. ENTER skips the card straight to the parade.</li>
+        <li><b>YOU ARE FIRED. got the verdict it deserves.</b> The roast's last line is now set at <b>76 px in a calligraphic script</b> (<code>FIRED_FONT</code>: Brush Script → Segoe Script → Chancery → Z003 → cursive), double-outlined in blood-red, and it <b>shakes</b> — per-frame jitter while the report scrolls under it. The report's layout grew a per-line slot system (<code>roastSlot</code>: 54 px pitch, the verdict gets 116 px) so the huge line doesn't crowd its neighbours, and <code>roastSpan</code>/<code>roastBottomY</code> derive from the same table — the send-off still triggers at bottom-edge 360 exactly (probe re-measured).</li>
+        <li><b>Probes updated + green:</b> <code>heli.js</code> (13 beats, both paths, on-frame), <code>swallow.js</code> (11.1 s exit, swallow → <code>seeya</code> → ENTER → parade; heli → end), <code>finale.js</code> (the chain now skips eulogy → card → chase), <code>sendoff.js</code> (trigger at 360, 27 shells / 2 553 embers at peak), <code>donfall.js</code> 3D + flat, <code>bubble.js</code>, <code>smoke.js</code>. Zero page errors.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>THE SWALLOW + THE CRASH AT A DISTANCE (2026-09-11, probe: <code>node probes/swallow.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The FINAL boss no longer flies — the ground takes him.</b> <code>startDonFall</code> picks the exit by stage (<code>mode: finalStage() ? 'swallow' : 'heli'</code>), so the last Don of the run (stage 2 in short mode, stage 5 of the campaign) is <b>swallowed</b>: the lawn gapes open (<code>ringK</code>, 0.9 s), he goes down his own height while the flames come up around his legs (<code>sinkK</code>), and <b>2016-09-11's retired</b> fire gag is back, longer: <b>a full five seconds</b> of flame at <code>SWALLOW_FIRE_T = 5.4</code> — a hard burp twice a second (12 tongues, camera kick, whoosh) with a steady trickle between, plus <b>rocks and lava</b> on ballistic arcs every 0.4–1.1 s that bounce twice and settle in the grass — then the hole <b>sews itself shut</b> (0.8 s) over the last of the smoke.
+          <li><b>One show, both render paths.</b> Every flame, rock and lava blob is simulated in <code>updateDonSwallow</code> and painted by <code>drawDonSwallowFx</code> on the SHARED overlay, so 2D and 3D are identical by construction; the 3D adds only what the overlay cannot: the firelight (<code>PointLight</code>, 2.1 intensity, flickering) and an additive pool of glow on the lawn. The 3D lawn is opaque, so sinking the rig below it does the clipping — the 2D painter does the same job with a clip at the lawn line.</li>
+        <li><b>The chopper crash moved up the lawn.</b> The flight's last legs (return → drop → follow → rest) now happen at <code>z = -60</code> — out past the board, behind the far fence — and the Don falls where he was released instead of closing the distance. At that depth the frame only has ≈270 px of air against 385 px at his own lane, so <b>the whole far sequence is played as a miniature</b>: the rig, the hull and the hanging chain all shrink by the same factor (<code>FAR_S 0.62</code>), which is exactly what the 2D painter does with <code>FAR_DS</code>/<code>FAR_LIFT</code>. The 2D's crash dust, debris and scorch land at the projected crash line in 3D (<code>R3.groundAt</code>) and at the board's own far-lawn line in 2D, so the wreckage is never left burning on the near lane.</li>
+        <li><b>Bubbles point AT him.</b> The speech bubbles and the thought cloud are shuffled into seven spots around the Don, so a fixed downward stub pointed at nobody — and overshot him by a whole box-height. <code>bubbleStem</code> now computes where the ray from the box to the speaker crosses the box's own edge and draws a curved, tapering tail from there to a clamped point on that line; the trail puffs of the thought cloud walk the same ray. The 2D anchor is his <b>gut</b>, not his shoes (<code>gy - 122</code>).</li>
+        <li><b>The Don's model stopped bleeding.</b> Skin pushed further into orange (a hue-preserving saturation/level compensation, 1.45/0.78), the chest and shoulder balls narrowed so nothing cuts through the jowls when he turns and bobs, the cap enlarged into a real ball cap with a bill <b>and the pompadour split in two</b> — a flat mass the cap sits on, plus the tall front lift the cap <i>hides</i> (a cap squashes a quiff, it does not intersect it; leaving the lift standing under the hat is what made it look like it was bleeding into his skull). The 2D painter grew the same quiff, and the roster's authored crown went 240 → 250 to keep the hit box honest (re-measured: 247 px).</li>
+        <li><b>Probes:</b> <code>node probes/swallow.js</code> walks both exits in both paths (7 swallow beats + 4 flight beats each), asserts the mode per stage, counts the flames/rocks and the far scorches, and checks the hand-off (swallow → parade on the finale, flight → end otherwise); <code>node probes/smoke.js</code> boots and plays ten seconds in 3D, <code>?flat</code> and <code>?short=0</code>. All green, zero page errors.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>THE LAST FLIGHT (2026-09-11, probe: <code>node probes/heli.js</code> + <code>node probes/donart.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The Don is rebuilt to the reference silhouette.</b> One layout table (measured off the sticker: legs 27% of him, a belly 48% of his height <i>wide</i> — wider than his shoulders — a head 23%) drives every part: an egg with a small head, stubby legs, thick short arms pinned outside the gut, a gold comb-over with the flip over the brow. He keeps the <b>navy suit, white shirt and red tie</b>. The wardrobe runs through a hue-preserving exposure compensation (the zombie one shifted navy → purple and skin → gold); the head is 1× (the old build scaled a walker skull by 1.25, which is what made him read as tall instead of fat).</li>
+        <li><b>The Don, alone, for the art pass:</b> <code>node probes/donart.js</code> renders him (rug / bare / cap) full-frame and cropped to <code>shots/donart/</code>.</li>
+        <li><b>Then THE LAST FLIGHT, for every Don EXCEPT the last one</b> (see THE SWALLOW above: the final boss is taken by the lawn instead). After the 5-bubble ramble and the thought cloud (unchanged) a <b>real helicopter</b> — glazed teardrop cabin, stepped engine deck, tapering boom, swept fin with its own rotor, stabiliser, skids, four-blade head and the blur it leaves — comes in over him, pays out a rope while he stands there, hooks him and hauls him <b>horizontal</b> (feet first, belly down — 44+138+182 = 364 px is the tallest hover at which he is still standing, and hanging him sideways is what buys the drop 143 px of clear air with the skids still in frame), lifts him <b>out of the frame</b>, flies him off to the horizon, comes back as a speck, and <b>drops him</b>: he falls out of the sky, tumbling, growing as his depth collapses, lands with a kick-18 + crater + dust, and then the chopper follows him in and <b>piles itself into the lawn</b> beside him (fireball, burning wreck, firelight, smoke) — and only then does the next-wave screen land.</li>
+        <li><b>One flight plan, two renderers.</b> <code>heliPath</code> in render3d is the single choreography (a 10-waypoint flight plan + beat channels; the 2D painter reads the same function), so the 2D and 3D paths and every probe freeze <b>the same beat</b> — <code>node probes/heli.js</code> screenshots all 13 beats in both paths and proves by projection that the pair leaves the frame, comes back small, lands and stops.</li>
+        <li><b>Gameplay honesty:</b> the wider silhouette widened <code>hitRadius</code> 1.0 → 1.6 (measured: the art is 1.87 columns across, the projectile test now matches it) and the contact blob grew with it.</li>
+        <li><b>BOTH render paths.</b> The 2D painter (<code>boss_art2d.js</code>) now reads from the <b>same proportion table</b>: the gut is one big egg drawn OVER a shoulder yoke that stays inside its line (so the silhouette is the belly, not the chest), the arms hang from inside that line and mirror outward so the <b>elbows</b> are the widest point, the legs are two shorter thicker segments, and the skull is drawn at <code>headS 0.78</code> about its own centre so the head can be re-proportioned against the body without re-authoring the face. He is also drawn FRONT-ON now: the walkers' asymmetric forward reach (armBase 0.28 vs 0.72) is remapped at the base for the Don only, so both arms hang at his sides and the gait's swing survives untouched.</li>
+        <li><b>Measured, not eyeballed:</b> <code>node probes/donmeasure.js [rug|bare|cap]</code> draws the 2D boss alone on an offscreen canvas and scans its own pixels — his height lands at <b>247px</b> (figCrown 250, so the hit box still measures the same man), the widest row is <b>0.66 of his height across at 39% up</b>, the shoulders sit at 0.50 and the head+hair is 0.51 of the gut — the reference's egg-with-a-small-head read, in 2D. It also writes <code>shots/donart/iso_&lt;flags&gt;.png</code>.</li>
+        <li><b>Probe-verified on both render paths</b> (3D default + <code>?flat</code>): zero page errors; the short campaign, all 22 long-game banners, the parade legs, THE END and the stage-2 handoff still pass.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>THE LONG GOODBYE + THE SEND-OFF (2026-09-11, probes: <code>node probes/donfall.js</code> + <code>node probes/sendoff.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The eulogy — one ceremony, BOTH Dons.</b> Defeated, he <b>stays on his feet, groggy</b> (limp arms, open jaw, a slow sway, a fine tremble) and rambles through <b>5 random bubbles</b> (18-message pool) before THE LAST FLIGHT above takes him.</li>
+        <li><b>Bubbles wander.</b> Each message pops up somewhere <b>new around him</b>: 7 anchor spots (high shoulders, wide mid-air, overhead, top corners) are <b>shuffled every run</b> — probe-verified bubble 1 → 2 moved (-240,-360) → (-300,-240), and the sequence differs between runs.</li>
+        <li><b>The last thought.</b> When the rant is spent, a <b>thought cloud</b> (scalloped lumps + trailing puffs down to his head, pop-in ease) drifts up with one incoherent line, trailing off on "…": "at last… at last… finally i meet up with Epstein again… we will party together again… the biggest party ever…" — 3 variants, random pick.</li>
+        <li><b>Then the departure.</b> The flight itself is documented above; the 3.0 s tip-over it replaced (and the earlier heli/swallow exits) are <b>retired</b>. The corpse model stands down the instant he is killed so the rig owns the body (no double-draw, boss HUD + stage-meter boss segment stand down with it).</li>
+        <li><b>THE SEND-OFF.</b> During the roast, the moment the <b>bottom edge of the report passes the halfway line</b> (probe: trigger fired at bottomY exactly 360), the sky answers: <b>10.5 s of saturated fireworks</b> — volleys of 2 building to 4 big two-tone shells at once (probe: 21–26 shells airborne, 2 581 live embers at the new 2 600 cap), two huge centre mega-crowns with a screen flash, boom audio throttled so the mix stays a boom. The report keeps scrolling through the show.</li>
+        <li><b>Then the paper rain.</b> As it calms, <b>confetti falls for ~10 s</b> (180 pieces probe-counted; tumble, sway and a flip-shade), a last gentle shell every second or two — and only then the CONGRATULATIONS / THE END screen lands, with the last confetti still coming down. ENTER skips roast / send-off / rain straight to THE END.</li>
+        <li>Probe-verified on <b>both render paths</b> (3D default + <code>?flat</code>): zero page errors; short campaign, all 22 long-game banners, parade legs and THE END still pass. The 2D boss's on-body CAP/RUG/BODY target marker stands down for the eulogy.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>COMEDY GAUNTLET — COMPLETE · 5/5 BLIND WINS vs SOUTH PARK (2026-09-11, probe: <code>node probes/comedy.js</code>, sheets: <code>shots/comedy/sheets/</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Bar: South Park: The Stick of Truth boss finishers</b> (6 verified reference frames in <code>shots/ref_spt/</code>). Five pieces, five blind critic rounds with labels stripped — <b>round 3: every sheet went to ours</b>. Runner-up gaps named and fixed each round.</li>
+        <li><b>Lane-hop life:</b> every 3 s a 1-in-5 roll — he leaps a lane <i>even standing still</i>. Eased arc, tucked legs, apex ~130 px, squash &amp; stretch, ground shadow stays pinned and shrinks, dust poof + skirl + camera kick 7 + thud on touchdown. Both render paths.</li>
+        <li><b>Idle bits:</b> accordion hands (2.4 s squeeze-box pump) and the YMCA on a 0.85 s letter beat — 3D arms sign-flipped so the letters actually read overhead; a hit cancels the bit.</li>
+        <li><b>Look destroyed = he TESTIFIES:</b> bigger phase beat (kick 22, slowmo 0.55) + a <b>howling gripe pose</b> + a random complaint from an 8-message pool ("MY HAT! That was a LIMITED EDITION.") pinned over him a full <b>3 s</b>, following him across lane hops. Critic quote on ours vs ref: ours "anchors the whine to the Don via an in-world bubble."</li>
+        <li><b>Exit 1 — THE HELICOPTER (first Don):</b> fly-in, rope payout, harness, lift with clearance, swinging carry while he screams one of 6 mid-air one-liners. Critic: "real motion and comedic violence."</li>
+        <li><b>Exit 2 — THE SWALLOW (final Don):</b> fire burps a <b>full 3.0 s</b> (flame tongues with bright cores, ground glow, smoke), then the lawn closes over a scorched crater. Critic: the winner frame "shows the arena made the kill."</li>
+        <li><b>More rambling:</b> last-words pool is 18 messages; five drawn per fall, all distinct.</li>
+        <li>Probe-verified on <b>both render paths</b> (2D <code>?flat</code> + default 3D): zero page errors, all timings exact (gripe linger 3.0 s, spew until t=3.0, heli timeline hover→hook→lift→carry).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>COMEDY GAUNTLET — IN PROGRESS (2026-09-11, probe: <code>node probes/comedy.js</code>, blind critics pending)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Bar:</b> South Park: The Stick of Truth boss finishers (6 verified reference frames in <code>shots/ref_spt/</code>). Every piece gets a builder/critic loop — critic judges blind, labels stripped.</li>
+        <li><b>Lane-hop life:</b> every 3 s a 1-in-5 roll — he leaps to the other lane <i>even standing still</i>. Eased jump arc (~0.62 s, apex 92 px), legs tucked, squash &amp; stretch, dust poof + wider skirl + camera kick + thud on touchdown. Both render paths.</li>
+        <li><b>Idle bits:</b> while parked he occasionally pumps the <b>accordion hands</b> (2.4 s squeeze-box bit) or bursts into the <b>YMCA</b> (four letters on a 0.85 s beat: high-V, hands-at-the-hat, swept-C, dome-A). A hit cancels the bit instantly.</li>
+        <li><b>Look destroyed = he TESTIFIES:</b> cap off or rug off now lands a bigger phase beat (kick 22, slowmo 0.55, 34-debris + 28-spark blast) plus a <b>random complaint from an 8-message pool</b> ("MY HAT! That was a LIMITED EDITION." / "MY RUG! Do you know how LONG that took every morning?") pinned over him for a <b>full 3 seconds</b> — it follows him across lane hops.</li>
+        <li><b>Exit 1 — THE HELICOPTER (first Don):</b> a chunky 2D/3D chopper flies in nose-first, pays out a rope, snags a harness on, and hauls him away swinging while he screams one of 6 mid-air one-liners ("THIS IS NOT A RETREAT. It is a strategic golf trip.").</li>
+        <li><b>Exit 2 — THE SWALLOW (final Don):</b> fire burps for a <b>full 3.0 s</b> (big bursts twice a second, white-hot cores, flickering 3D firelight), then smoke, then the lawn closes by 3.8 s.</li>
+        <li><b>More rambling:</b> the last-words pool is 18 messages now (was 10); five are drawn per fall.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>SHORT BY DEFAULT + EVEN SHORTER (2026-09-11, probe: <code>node probes/short.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Short is now the default game.</b> A plain URL plays the short campaign; <b><code>?short=0</code></b> restores the FULL 5-stage game. The menu announces whichever mode you're in (with the other mode's flag).</li>
+        <li><b>Short got shorter — about a third of the campaign.</b> Each short stage is now <b>3 waves</b> (boss on wave 3) instead of 5: 6 waves total vs the long game's 22, with the ÷3 horde and faster spawn gaps on top. Probe-verified: stage 1 = "WAVE 3 — THE DON" with <code>boss5</code>, stage 2 = "THE FINAL WAVE — THE DON" with capped <code>boss10</code>, full parade + THE END intact. ✔</li>
+        <li>Long-game regression (<code>?short=0</code>): all 22 story banners, the ×4 economy (12/40/12/40), the Don-fall ceremony (5 rambles → fire → swallowed) and the stage-5 finale all still pass, zero page errors. ✔</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>THE CEREMONIOUS FALL (2026-09-11, probe: <code>node probes/donfall.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>When The Don falls, he does not just vanish.</b> A <code>fall</code> phase opens the celebration: he lies where he dropped (2D frozen die pose / 3D standalone rig) and <b>rambles — 5 random speech bubbles</b> from a 10-message pool of incoherent, merciless Trump-style last words: "The plants never got the nuke. I HAD the nuke. A beautiful nuke. They said, sir, you can't nuke the garden. WRONG!" · "My rug was REAL. This rug election was RIGGED." · "Nobody obliterates like me. Ask anyone." Each bubble hangs 2.6s.</li>
+        <li><b>Then the ground takes him.</b> A hole opens under the lawn (3D: disc+rim meshes; 2D: closing ellipse), <b>fire spews for ~3 seconds</b> (probe caught 113 live flame spheres mid-spew), he sinks under (<code>sinkK</code> 0→1), and the ground closes back to flat lawn. Only then the parade/celebration begins. Both Dons — stage 2 and the finale — get the full send-off.</li>
+        <li><b>Roast scroll 3× slower</b>: measured exactly <b>28 px/s</b> (was 85) — the neighborhood report is now savorable. ENTER skips: eulogy → chase → roast → menu, one stage each.</li>
+        <li>Regression after the change: short campaign, 22 story banners, THE END flow, and the ×4 economy (12/40/12/40) all still pass, zero page errors.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>3D CHASE + ROAST PASS (2026-09-11, probe: <code>node probes/parade3d.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The chase plays on the 3D lawn.</b> In 3D mode the parade is real rigs (<code>render3d.paradeInit/paradeSync/paradeClear</code>): standalone zombie models (same builders as the pool, never in it) march the front lanes with a SECOND pult rig doing the chasing/fleeing. The BOARD pult is hidden for the whole parade — the only pult on screen is the one in the chase; it returns to its rail when the rigs strike (probe-verified both ways). 2D/flat mode keeps the sprite parade.</li>
+        <li><b>Slower + a 3-second beat.</b> Chase speed 330→<b>160 px/s</b> (probe: exactly 160 px/s over 1s); after leg 1 the parade <b>regroups for exactly 3.0s</b> (on-screen countdown) before the pult is chased back.</li>
+        <li><b>The pult knows.</b> In leg 2 it grows a white <b>thought bubble with a red "!"</b> (2D: above the sprite; 3D: anchored to the projected rig position) — frame in <code>shots/finale/bubble_chase.png</code>.</li>
+        <li><b>THE ROAST.</b> When the chase ends, the neighborhood report scrolls up the burning night sky: "He promised a wall… we built him a compost heap instead" · "Fake hair. Real losses." · "No collusion — just collision, with melons, at terminal velocity" · "Impeached by artillery. Convicted by squash." · "YOU ARE FIRED." — then, only after it rolls off, the CONGRATULATIONS / THE END screen lands. ENTER skips chase → roast → menu, stage by stage.</li>
+        <li><b>?short=1 waves are 1/3.</b> Wave horde counts ÷3 (probe: short 2/2/3/3 vs normal 5/6/8/10) and spawn gaps ×0.6 — the test campaign's waves end about three times quicker. Boss waves unchanged.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>?short=1 — THE SHORT TEST GAME (2026-09-11, probe: <code>node probes/short.js</code>)</h3>
+    <div class="note">
+      <ul>
+        <li><b><code>index.html?short=1</code></b> collapses the campaign into <b>two stages, a Don in each</b>: stage 1 = the plain Don (<code>boss5</code>, no cap), stage 2 = the FINAL capped Don (<code>boss10</code>) → parade → fireworks → <b>THE END</b>. Menu shows a "SHORT TEST GAME" tag.</li>
+        <li>Probe-verified end-to-end: stage-1 boss wave banners "WAVE 5 — THE DON" with <code>boss5</code>; kill → daylight celebration, honest clear screen ("THE DON IS DOWN! / NEXT — STAGE 2 · THE FINAL WAVE"); stage-2 boss wave "THE FINAL WAVE — THE DON" with capped <code>boss10</code>; kill → parade (fireworks gated to 0 until both legs) → THE END screen. ✔</li>
+        <li>Implementation: <code>G.SHORT</code> parsed in <code>main.js</code>; <code>Game.bossStage()/finalStage()</code> are the only stage checks (waves, boss pick, finale, meter, banner, clear screens all re-keyed — the literal <code>(S===2||S===5)</code> gate in <code>startWave</code> was the bug the first probe caught). Epilogue line swaps to "Two stages. Two Dons." in short mode.</li>
+        <li>Normal mode regression-checked after the change: all 22 banner/sub pairs, ×4 economy (12/40/12/40/40), stage-2 clear and THE END still pass (<code>probes/finale.js</code>, <code>probes/boss4.js</code>). ✔</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>STORY + FINALE PASS — SHIPPED AND PROBE-VERIFIED (2026-09-11)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Wave storyline, waves 1→5, every stage.</b> Each wave banner now carries a story line under the headline (<code>STORY</code> table in game.js): stage 1 the garden wakes → stage 2 THE DON comes → stage 3 the masterless horde → stage 4 the shadow grows → stage 5 THE FINAL. Boss waves read the Don line. All 23 banner/sub pairs probe-read correct (an off-by-one was caught by the probe and fixed — waves are 1-based, the table is 0-based).</li>
+        <li><b>Honest stage-clear screens.</b> "THE DON IS DOWN!" now appears <b>only on stage 2</b> (the only stage before the finale where he falls); stages 1/3/4 get their own headline. Next-stage teasers are per-stage and correct (<code>NEXT — STAGE n·…</code>), and the prompt says the real next stage — the old hard-coded "ON TO LEVEL 3" and "STAGE 5 IS WAITING" are gone, along with the stale ×1 economy tip.</li>
+        <li><b>The finale parade (stage 5, after The Don falls):</b> leg 1 — the surviving horde parades out of the garden left→right with the melon-pult chasing them; leg 2 — the favour is returned, the pult flees right→left with the horde after it. Probed: leg switch at the right px, fireworks gated to zero until both legs clear. <code>ENTER</code> skips.</li>
+        <li><b>THE END:</b> when the screen empties, night falls, the fireworks spectacular doubles up, and the finale copy lands — CONGRATULATIONS · THE DON IS GONE FOR GOOD. CAP OFF. RUG OFF. GONE. · <b>THE END</b> · score/stats · ENTER to the menu, R replays the finale.</li>
+        <li>Frames: <code>shots/finale/</code> (s1/s2 clear screens, parade leg 1 + leg 2, the_end).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>GAUNTLET ×4 + STAGE METER — SHIPPED, MEASURED, BLIND-WON (2026-09-11)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The Don is 4× harder.</b> Roster (<code>js/zombie_types.js</code>): cap <b>10→40</b> flat hits or <b>3→12</b> high arcs · rug <b>3→12</b> high arcs · body <b>10→40</b> flat or <b>3→12</b> high. A full fight now costs <b>≈92–104 shots</b> (was ≈23–26). Both Dons (stage 2 + stage 5).</li>
+        <li><b>Probe-verified live-fire</b> (<code>node probes/boss4.js</code>, real <code>bossImpact</code> path): rug 12 high arcs · cap 40 flat / 12 high · body 40 flat / 12 high · flat shots still bounce off the rug. ✔</li>
+        <li><b>Stage progress meter</b> (PvZ flag bar, bottom-right of the HUD): dark track, one flag per wave, boss wave gets the big red flag; fill advances per cleared wave and <b>during the boss wave the last segment fills with the fight itself</b> — cap → rug → body. Caption says exactly how much is left (<code>3 WAVES LEFT</code> … <code>THE DON!</code>).</li>
+        <li><b>Probe-verified meter</b>: pixel-scanned fill at stage 5, 16/40 cap hits reads frac <b>0.822 vs 0.827 expected</b>; flags + red boss pennant confirmed in-frame. ✔</li>
+        <li><b>Boss HUD auto-fit</b>: 40 cap pips and 12 chevrons shrink to fit the 600px panel — no overflow; rug-scratch art spacing clamped to the rug at any depth.</li>
+        <li><b>Blind critic round 1 — WON BOTH</b> vs real PvZ 1 roof-finale footage (<code>shots/ref_pvz/</code>): meter "readable alone… fill, flags, flagged endpoint" beats PvZ's unlabeled bar; fight instrumentation beats the Zombot frame's none-at-all. Sheets + keys: <code>shots/gauntlet/x4/</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>THE FIGHT — SHIPPED AND MEASURED (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Two bosses, one economy.</b> <code>boss5</code> (stage 2, wave 5) and <code>boss10</code> (stage 5 — <b>the FINAL stage</b> — wave 5) — both gargantuan orange figures at <b>≈1.85× a walker</b> on screen (measured from the art strip, not claimed), in a suit, with a long red tie and small hands. They are the only zombies that never enter the random spawn table.</li>
+        <li><b>Phase 1 · the cap</b> (final boss, stage 5 only): <b>10 hits</b> or <b>3 high arcs</b> knock the red MAGA cap off.</li>
+        <li><b>Phase 2 · the rug</b>: <b>3 high arcs ONLY</b>. A flat shot bounces off the toupee — the HUD drops its hit track entirely and shows three chevrons, and the boss carries a pulsing <code>RUG · HIGH ARC</code> marker over his head.</li>
+        <li><b>Phase 3 · exposed</b>: <b>10 hits</b> or <b>3 high arcs</b> to put him down. An iron shell counts as a high-arc strike — a real shortcut, never a one-shot.</li>
+        <li><b>Every high hit shakes the whole body</b> (2D: canvas translate+rotate on the sprite; 3D: root rotation + vertical jolt on the rig) and every phase change gets hitstop, slow-mo, a camera flash and its own popup.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>PROBE RESULTS — <code>node probes/boss.js</code></h3>
+    <div class="note">
+      <ul>
+        <li><b>Stage 2:</b> 2 flat hits on the rug → <code>toupeeHigh 0</code>, rug still on (bounce, not damage). 3 high arcs → <code>rugOn false</code>. 9 flat hits → alive. 10th → dead. ✔</li>
+        <li><b>Stage 5 (final):</b> cap survives 2 high arcs, falls on the 3rd; the rug is untouched by the whole cap phase (<code>bodyHits 0</code>); 3 more high arcs strip the rug; 3 more kill him. <b>20 flat hits never strip the rug</b> — the arc really is the lever. ✔</li>
+        <li><b>Iron:</b> 2 shells leave the rug on, the 3rd strips it. ✔</li>
+        <li><b>Hit box shrinks with the headwear</b> (8.86 → 8.37 → 8.18 height units) so a shot above the bare head no longer registers on empty air. ✔</li>
+        <li><b>Live fire through the real input path:</b> 58° at v=11 (apex 4.14 ≥ 4.0) lands on him and increments <code>toupeeHigh</code>; 58° at v=9/10 (apex 3.4/3.75) fall short and do nothing. The skill gate is real, not synthetic. ✔</li>
+        <li><b>Lose flow:</b> two buttons (RESTART LEVEL / QUIT), a 10-second bar draining under them, and an expired timer that <b>quits to the menu</b> — verified by running 11 simulated seconds and reading <code>state === 'menu'</code>. ✔</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>GRAVESTONES RESIZED — PROPORTIONAL TO THE CAST (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Measured, not eyeballed</b> (<code>node probes/stones.js</code>): the old stone stood at <b>0.35-0.4× a walker</b> — a pebble next to the corpses it shares a lane with. Now <b>0.58× in 3D</b> (9.43wu vs 16.2wu Box3) and <b>0.64× in 2D</b> (109px vs 170px, pixel-scanned off the real painters) — the PvZ gravestone read.</li>
+        <li><b>One number, both render paths:</b> <code>STONE_BLOCK_H = 2.8</code> Board units in <code>game.js</code> is the stone's height AND its block ceiling — the 2D painter is authored ×1.4 to ≈106px ≈ 2.8u, the 3D model rebuilt to ≈9.4wu. The hitbox tracks the art (the lesson from the cone/bucket bug), and the block ceiling sits just above the visible cap, the same mesh-inside-its-box convention every zombie uses.</li>
+        <li><b>Live-fire proof:</b> a flat 25° shot crosses the stone at 1.51u → <b>BLOCKED</b>; a high arc (crest 3.9u) crosses at 3.42u → <b>CLEARS and lands past</b>. The HIGH ARC lever still beats cover.</li>
+        <li><b>Gameplay consequence, stated honestly:</b> stones block below 2.8u where they used to block below 1.75u — they are now real cover, and mid arcs that used to sail over slam into them. Tombstones (stage ≥2) matter more; lob high or go around.</li>
+        <li>FX anchors (debris, sparks, BLOCKED/CRUMBLED popups) and the ground shadow track the new height.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>HARSH CRITIC ROUND 1 — VERDICT: THEIRS, ONE GAP, FIXED (2026-09-10)</h3>
+    <div class="note">
+      <p class="note">The critic was given the four captures blind, the bar described strictly (Zomboss structure / Gargantuar silhouette), and told praise is useless.</p>
+      <ul>
+        <li><b>Verdict:</b> <b>THEIRS.</b> "A PvZ player reads a boss from a face and a silhouette, and our shipped 3D render has neither."</li>
+        <li><b>The single biggest gap:</b> <em>the boss had no front.</em> In 3D every identity feature — face, white shirt, red tie, lapels, collar, the MAGA lettering — was either modelled <b>inside</b> the torso/head volumes or rotated edge-on to the camera (the label sat on his temple). Rendered as a featureless blue column under an orange dome.</li>
+        <li><b>Fix shipped:</b> the front is now a <b>decal</b> — a camera-facing canvas-textured plane standing proud of the volume it dresses. One for the chest (shirt V, two lapels, the long red tie), one for the face (eyes with whites and catchlights, heavy lids, brows, nose, mouth, jowl crease), and the MAGA plate moved to the camera side and pushed out of the cap's own front surface (at <code>-PX(21·sk)</code> it was <b>inside</b> the dome and never rendered at all). A plane cannot be swallowed by the body it is attached to.</li>
+        <li><b>Also from the audit:</b> the 2D boss was measured <b>proportionally narrower than a football zombie</b> (shoulder span ÷ height 0.55 vs 0.75) — shoulders widened 50→72; and the rug read as a <b>bandana</b> because one dark diagonal ran across the crown — replaced with a real hairline that dips at the temples, a temple notch, a short part and strands that follow the swoop.</li>
+        <li><b>Also from the audit:</b> "the gameplay layer is not dimmed" on the finale — the score/wave/ammo rail now stands down on the celebration screens, which carry their own numbers.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>CELEBRATIONS</h3>
+    <div class="note">
+      <ul>
+        <li><b>Stage 2:</b> daylight fireworks (shells rise, slow, break big) over the sunset lawn, <em>THE DON IS DOWN</em>, the bonus, and a nudge: "STAGE 5 IS WAITING — AND HE WEARS THE RED CAP."</li>
+        <li><b>Stage 5 (final):</b> the sky goes <b>dark</b> — deep navy gradient, 150 twinkling stars, a low moon — fireworks run at <b>~2.5× the rate and double the burst size</b>, and the congratulations <b>scroll up</b> the middle of the screen: cap off, rug off, ten clean hits, final score, high score, glory kills.</li>
+        <li>Fireworks are their own FX system drawn <b>after every overlay</b>: particles live inside the world pass and get dimmed by the win veil, and a firework behind a 60%-alpha veil is not a celebration.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>KNOWN GAPS (honest list)</h3>
+    <div class="note">
+      <ul>
+        <li>The bosses are <b>procedural canvas/three.js geometry</b>, not licensed art — after the critic round the caricature is unmistakable (orange, gold swoop, red MAGA cap with legible lettering, long red tie, small hands, a readable face) but it is not a hand-painted PopCap portrait.</li>
+        <li>The 2D face's heavy brow still reads a little like spectacles at gameplay size.</li>
+        <li>In 3D the arms' shoulder spheres read as shoulder pads rather than shoulders.</li>
+        <li>The finale deletes the corpse it is about — the boss is gone by the time the fireworks start, so nothing on screen shows who was beaten.</li>
+        <li>No real PvZ footage or sprites were obtainable in this environment (every asset fetch 404s), so the blind A/B ran against the strictly described bar and our own captured frames — not against footage. That limitation is real and is not papered over.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>SUN-ANCHORED SHADOWS v2 — DIRECTION FIXED, DIP HALVED (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The mismatch:</b> the painted sun reads <b>top-centre</b> on screen (measured disc centre at x 647/1280, y 144), but the key light was parked far off to the left corner (<code>(−150,105,−75)</code>) — so every shadow slanted hard to the RIGHT while the sun stared straight down the middle.</li>
+        <li><b>Fix:</b> the directional light now sits on the sun's own line (<code>(−14,170,−235)</code> — same world x as <code>SUN_WX</code>, beyond the far edge): shadows fall <b>toward the camera (down-screen)</b> with the sun's tiny left-offset slant (~10°), never sideways. Elevation is cheated to ~36° — a true horizon sunset would cast infinitely long shadows.</li>
+        <li><b>50% more subtle, measured honestly:</b> the old probe's bands under-measured the cast core (claiming 8%); sampling <i>inside</i> the true shadow showed a <b>35% dip</b>. Rebalanced fill vs key (hemi 0.58→<b>1.15</b>, sun 0.92→<b>0.18</b>) halves it to <b>18%</b> — shadows are now a whisper: present enough to ground the props, never harsh.</li>
+        <li><b>Visibility without darkness:</b> elevation eased to ~31° so the faint shadows stretch into long soft streaks — length reads where contrast must not. Contact blobs nudged 0.50→0.55 so the pult pot anchors like the zombies do.</li>
+        <li><b>Blind re-verify:</b> the critic picked ours over BTD6 — "the zombie/door's shadow falls down-right of its base, pointing away from the sun as it should at dusk… calibrated right for the stated intent."</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>SCOREBOARD AFTER 9 BLIND CRITIC ROUNDS</h3>
+    <div class="note">
+      <ul>
+        <li><b>SHADOWS — INDIE WINS.</b> Picked blind in 6 consecutive rounds: one believable sun keyed to the painted sunset, every shadow falling the same right-and-toward-camera direction, 91.6% luminance retention (very subtle), nothing blown out. BTD6's flat ambient fill lost the coherence criterion every time.</li>
+        <li><b>GLOW — INDIE WINS.</b> The gate is honest and was identified correctly in 7/7 blind rounds: no glow at 30°, no glow below the marker, no glow at MAX dwell, glow exactly in the 45°+STRONG window. The meter now paints the STRONG window as a dark dashed zone with lime fill-in-band.</li>
+        <li><b>BUCKET — INDIE WINS.</b> "Dents and tilt genuinely accumulate on the bucket itself… would absolutely make a player feel the kill." 5-hit economy (4/5 → OFF), hitstop pop beat, debris burst, darkening metal.</li>
+        <li><b>DOOR — honest loss on framing.</b> The material converged (cream frame, dark weave, yellow kick panel, knob + latch, one consistent shadow), but the tower-defense camera sits BEHIND the zombies, so the screen face can't stare into the lens the way official side-view art does. Renders, reads as a door with hardware, casts one shadow — the identity loss is the camera's, not the prop's.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>THE SCREEN DOOR WAS NEVER IN THE WORLD (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Root cause:</b> the held-prop builders in the 3D rig (<code>screen/paper/pole/pick/flag</code>) return their group but never parent it — unlike the head props, which all <code>g.add()</code> themselves. The door toggled <code>visible</code> on an orphan floating outside the scene graph. One <code>if (held) g.add(held)</code> line later: parented, visible, 2.2k mesh pixels at its projected position.</li>
+        <li><b>Material rebuilt to the reference's signifiers:</b> cream frame, dark translucent wire-mesh weave (see-through to the carrier), yellow kick panel, brass knob + latch, mesh excluded from the shadow map so the door no longer throws a second orphan slab shadow.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>SHADOWS NOW OBEY THE PAINTED SUN (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li>The key light used to come from the upper-right (<code>(60,80,90)</code>) while the painted sun sits <b>left of centre beyond the far edge</b> (<code>SUN_WX = −14</code>). The directional light now rakes in from the sunset's true side (<code>(−150,105,−75)</code>) — shadows fall right and toward camera, never against the visible sun.</li>
+        <li><b>Very subtle, as ordered:</b> fill lifted (hemi 0.42→0.58), key eased (1.05→0.92), PCFSoft + shadow radius 4. Measured: the lawn's shadow band keeps <b>91.6% of lit-lawn luminance</b> — present, soft, never harsh.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>STRONG THROW — THE GLOW WINDOW (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>The rule, exactly as asked:</b> the melon glows only while the aim is <b>over 45°</b> AND the charge sits <b>between the HIGH ARC marker and MAX</b>. Over MAX (the dwell) the throw is overcharged — the glow dies. The meter paints the window as a dark dashed STRONG zone; the fill turns lime inside it; the angle readout goes green past 45°.</li>
+        <li><b>Both render paths:</b> 2D draws a three-layer pulsing bloom with rotating flare ticks on the scoop melon (re-painted in front of the body when the wind-up would hide it); 3D pulses a green emissive + scale bloom on the held and flight melons. Pixel probes: +1185 halo pixels in-window vs the flat-aim control.</li>
+        <li><b>A glowing hit:</b> pops the bucket instantly (<code>BUCKET OFF GLOW!</code>) and <b>stuns unprotected zombies</b> to their knees (glory-kill window). A glow strike that only breaks a door does not stun.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>BUCKET = 5 HITS, AND THE ARMOUR IS THE HEALTH BAR (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><code>BUCKET 4/5 → 3/5 → 2/5 → 1/5 → OFF</code> — every hit (head or body) loosens it; the 5th removes it. Cone and football helmet keep their 1-hit rules.</li>
+        <li><b>The armour narrates:</b> per hit the 3D bucket gains dents (incl. a camera-side one), darkens and tilts; the 2D dome sprays dents, scorches and tilts 0.3 rad. The pop is an event: hitstop, flying steel chunks, bigger <code>BUCKET OFF!</code> popup. One found bug: body hits never incremented the dent counter — head-only, so the armour stayed pristine in the whole live-fire sequence.</li>
+        <li><b>Armour pips:</b> the white helmet pip is now a row of up to 5 amber pips draining beside the health bar.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="live" style="margin-top:26px">PREVIOUS — FEEL &amp; TIMING PASS</div>
+  <h1 style="font-size:24px">Hit Stagger · Catapult Swing Rebuilt · Bigger Trees · Longer Stun</h1>
+
+  <div class="card good">
+    <h3>THE CATAPULT SWING WAS FIGHTING ITSELF (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Two bugs in one rig.</b> The 3D drew the arm with <code>rotation.z</code> (three.js: +ve = tip UP) but the melon's release point was computed as if the same angle were canvas-space (+ve = tip DOWN). So the arm was painted above the axle while the melon spawned from a point <i>below</i> it — the melon never left the scoop it was drawn in.</li>
+        <li><b>And the release was a teleport.</b> The angle jumped from the cocked pose to the fired pose in a single frame (a 215° snap), then slowly drooped back. There was no swing to watch.</li>
+        <li><b>Fix: one convention, three consumers.</b> <code>G.PULT_ARM</code> now holds the key angles in a single world convention (0 = arm horizontal, +ve = tip raised forward), shared by the 2D sprite, the 3D rig and the melon release point. Canvas <code>rotate()</code> is inverted, so the 2D painter is handed <code>-a</code>; that inversion is exactly what had been silently wrong.</li>
+        <li><b>The cycle, measured:</b> ready <b>+54°</b> (scoop up-forward, melon loaded high) → winds to <b>−143°</b> (back and LOW) → release whips through to <b>+74°</b> (forward and HIGH) in <b>0.07s</b>, monotonic with no snap → eases back to ready over 0.5s. Probe trace: <code>−143° → −5° → +47° → +74°</code> frame by frame.</li>
+        <li><b>Both paths match:</b> the 2D arm is painted behind the pot when swung back (no impalement read), and the 2D and 3D release points are both derived from the same launch angle.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>FEEL CHANGES (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Hits stagger zombies.</b> A hit stops the zombie dead, resets its move timer and adds <b>1 extra second</b> of standing before it shambles on — so it loses the progress it had made toward the next square. Measured in a live wave: an unhit zombie advances <b>3.00 squares per 10s</b>; the same zombie hit once advances <b>2.00</b>. The bonus is capped at 2s so a burst of hits can't pin a zombie to the spot, and it snaps to the nearest grid square so the 4×10 grid contract holds. Wired into body hits, head hits and barricade hits alike.</li>
+        <li><b>Stun +2s:</b> the kneel (the glory-kill window) goes 3s → <b>5s</b> via a named <code>KNEEL_SECONDS</code>, with the HUD countdown ring rescaled to match. Probe: stunned at 5.00s, recovered at 5.08s.</li>
+        <li><b>Trees ~2× larger.</b> 2D corner trees doubled (2.1→4.2, 2.2→4.4) and nudged outward so no canopy crosses the board edge, which stays 100% clear. 3D: the treeline sits close to camera (z ≈ −43), so a 2× tree in the middle of the frame is ~250px tall, reaches the top of the frame and erases the sunset — the <b>big trees now only grow outside the lawn footprint</b>, framing the scene at the edges, while the centre stays low scrub.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="live" style="margin-top:26px">PREVIOUS — SUNRISE FIX</div>
+  <h1 style="font-size:24px">The Sun Rises Over the Mountains</h1>
+  <div class="sub">Both render paths · <span class="bar">measured on the rendered frame, not eyeballed</span></div>
+
+  <div class="card good">
+    <h3>THE SUN WAS NEVER ON SCREEN (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>What was wrong:</b> the sun disc was painted into the sunset backdrop at u <b>0.66</b> of a 1400-wide plane — world x <b>+224</b>. At that depth the camera's frame only spans world x ±120, so the sun sat <b>1.87× past the right edge of the screen</b>. It had been authored, reviewed and "verified" as part of the sunset, and no player had ever seen it.</li>
+        <li><b>Now:</b> a single shared world position (<code>SUN_WX = −14</code>) drives both canvases, because the two planes are different widths — the backdrop is 1400 wide but the hill planes are only 620, so the same world x is u 0.490 in one and u 0.477 in the other. Both constants are derived, not typed twice.</li>
+        <li><b>Sized to the sky, not to taste.</b> At that depth the frame top is 12° below horizontal and the hill ridge sits at ~14.9°, so the open sky above the mountains is only a <b>~70px strip</b> on a 720 canvas. A 23px texture radius projects to a 58px disc — big enough to read, small enough that its crown clears the frame edge while its base settles onto the ridge.</li>
+        <li><b>Measured on the finished frame:</b> disc centre at screen y 42 against a ridge line at y 64 — crown 20px clear of the frame top, base touching the mountains. Exactly the shot asked for.</li>
+        <li><b>Rim light on the ridge:</b> both paths now light the hill silhouette along its top edge with a gradient centred on the sun's own x, so the peaks catch the light spilling over them and the sun reads as <i>behind</i> the mountains rather than pasted in front. The halo is kept tight (2.1× the disc) — a wide glow just blows out a 70px sky strip and the disc stops reading as a disc.</li>
+        <li><b>2D matched:</b> the flat-mode sun was half-buried in the far ridge at (1010, 116); it is now at (650, 86), fully clear of the ridge (≈121 there), clear of the near cloud at x 560 and the windmill at x 1092, with the same rim treatment on the 2D ridge path.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="live" style="margin-top:26px">PREVIOUS — SCENERY + COLLISION PASS</div>
+  <h1 style="font-size:24px">Windmill on the Horizon · Zombie-Scale Cottage · Full-Height Hitboxes</h1>
+  <div class="sub">Probe-verified in the browser on both render paths · <span class="bar">every claim below is measured, not eyeballed</span></div>
+
+  <div class="card good">
+    <h3>COLLISION FIX (2026-09-10) — shots into the cone/bucket now land</h3>
+    <div class="note">
+      <ul>
+        <li><b>The bug:</b> the projectile hit test used a fixed ceiling of <code>h &lt; 2.3</code> world height-units, written for the old squat box-man. When the zombies were rebuilt at PopCap proportions the figure grew to <b>4.42u</b> — and the cone reaches <b>6.16u</b>. Everything above 2.3 was literally outside the collision box, so a melon landing on the hat passed straight through the zombie.</li>
+        <li><b>The fix:</b> hit bands are now derived from the art, in the roster (<code>ZT.hitBands()</code>): figure crown 168px, head band starts at 96px, plus a per-prop headwear allowance (cone 66, bucket 56, helmet 14, hard hat 12). The box tracks the drawn figure per type and scales with the zombie.</li>
+        <li><b>Second fix:</b> impacts are resolved on the <b>rise as well as the fall</b>. A melon that touches a zombie hits it, whether it is dropping onto the head or climbing into the chest. Previously only descending shots could collide.</li>
+        <li><b>Height decides head vs body.</b> Above the head band the shot is a head hit (knocks off the cone/bucket/helmet, or drops a bare-headed zombie to its knees); below it is a body hit. The screen door, newspaper, pole and shoulder pads still eat everything frontal — only a HIGH ARC lob clears them, so the "evade the helmet and the shield" brief survives.</li>
+        <li><b>Measured sweep</b> (a projectile dropped into the zombie's column at each height): conehead registers hits 2.8→5.6, bucket 2.8→5.6, shambler kneels 2.8→4.2, digger hard hat 2.8→4.6, and every type passes cleanly above its own box top — no phantom hits.</li>
+        <li><b>Live-fire through the real input path</b> (charge, release, physics): <b>9/9 shots connect for all nine types</b>. Flat shots take body damage or hit the barricade; a full-power lob drops onto the head — KNEEL for the unarmoured, HEADWEAR-OFF for cone/bucket/digger, and it clears the screen door and newspaper for a head hit.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card good">
+    <h3>SCENERY (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>Windmill → the horizon.</b> It stood at z −17, in the middle of the field, where it read as a garden ornament. Now at z −104, standing on the meadow's far edge where the horizon line projects, with longer sail arms (a windmill is mostly sail) and a door, hoist band and gallery ring so it reads as a building. At that depth the whole visible sky band is only ~100px, so it is sized to ~15wu — any taller and it would run off the top of the frame.</li>
+        <li><b>Cottage rebuilt at zombie scale.</b> A zombie stands ≈19wu, so the front door is now 16wu (a zombie just clears it), the eaves 20.5wu and the ridge 34wu — about 1.8 zombie heights, which is what a cottage looks like beside a person. The old box was <b>6.4wu, a third of a zombie</b>: a doll house.</li>
+        <li><b>And it looks like a house now:</b> jettied upper storey over a timber jetty beam, pitched roof with ridge cap, weathervane finial and a dormer window punched through the front slope, a stone chimney with a cap, fachwerk framing with braces, two shuttered windows with sills and flower boxes (flowers, not just boxes), an upper-storey window pair, a panelled door with a knob on a step, a porch canopy on posts and a lit lantern.</li>
+        <li><b>Framing:</b> the cottage sits at x −64 so its whole footprint stays outside the lawn's −50 edge — it never stands on a play column — while staying inside the frame at that depth. Height is capped by the camera: at z −20 the ground line is at y≈334 and one world unit is ~8.9px, so anything over ~37wu would run off the top.</li>
+        <li><b>2D windmill</b> enlarged 1.75× with a door and a cap — it used to be ~36px, a quarter of a zombie, and read as a speck.</li>
+        <li><b>Regression:</b> 45 simulated seconds of a real wave with autofire — clean, 2 kills, 2 glory kills, all three armour classes firing popups, zero page errors.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="live" style="margin-top:26px">PREVIOUS — ZOMBIE ROSTER GAUNTLET</div>
+  <h1 style="font-size:24px">PopCap Roster · 2D Rig · 3D Poly Models</h1>
+  <div class="sub">Builder/critic gauntlet on real browser renders · <span class="bar">Bar: PopCap's shipped Plants vs. Zombies zombie art (shots/gauntlet/ref/*.png, blind A/B, labels stripped, figure-normalised)</span> · both render paths</div>
+
+  <div class="card good">
+    <h3>ZOMBIE GAUNTLET — roster + look + poly count (2026-09-10)</h3>
+    <div class="note">
+      <ul>
+        <li><b>One source of truth:</b> <code>js/zombie_types.js</code> — 9-row roster (stats, armour tiers, palettes, proportions, props, gait) consumed by BOTH <code>zombie_art2d.js</code> and <code>render3d.js</code>, so 2D and 3D stay the same character.</li>
+        <li><b>Roster (was 5 near-identical bodies):</b> Basic · Conehead · Buckethead · Screen Door · Newspaper (tears → <b>enrages</b> and sprints) · Pole Vaulting · <b>Football</b> (helmet + shoulder pads) · <b>Flag</b> (leads each wave) · <b>Digger</b> (hard hat lamp + pickaxe).</li>
+        <li><b>Variety:</b> per-zombie seeded wardrobe + skin tone + hair + teeth gaps + gaze drift, so a wave reads as a crowd, not a clone army. 8 skin families × 8 garment sets × 4 trouser sets.</li>
+        <li><b>2D:</b> replaced the single static body sprite with an articulated rig (2-segment legs and arms with knee/elbow joints, bone-and-sausage hands, a shared big-skull head with hooded lopsided eyes, an underbite grin) plus a prop painter registry. Head ≈ 1/3 of figure height.</li>
+        <li><b>3D:</b> box-man → modelled character. <b>~16,500 triangles and ~45 parts per zombie</b> (was ~300 triangles, ~10 boxes): domed cranium + jaw + muzzle + brow + bulging sclera + pupils, articulated limbs, lapels/collar/tie, and real props (cone, dented bucket, framed wire-mesh door, broadsheet, facemask helmet, shoulder pads, vaulting pole, pickaxe, banner).</li>
+        <li><b>Measured fixes (not guesses):</b> pixel-probing showed the 2D cast rendering at <b>median skin luminance 124 against a 199 base tone</b> — fixed by re-wrapping the shared shading ramp, not by repainting the palette. 3D skin was bleaching under the dusk key light (hemi 0.42 + warm sun 1.05), so zombie materials are now exposure-compensated (darker, more saturated, hue-corrected) and neutral materials are exempted so eye whites stop turning yellow.</li>
+        <li><b>Pose:</b> the hunch now pivots at mid-torso so the pelvis slides back while the head leads, and arms hang slack and forward instead of tucking at the waist.</li>
+        <li><b>Blind critic rounds so far:</b> R1 <b>4/10</b> ("bland, not ugly", gaps: eyes, pose, shading) → R2 <b>4/10</b> but "slightly better on faces", verdict moved to <b>pose + shading + prop fidelity</b>. Remaining named gaps are logged below as the open work.</li>
+        <li><b>Perf:</b> 14 zombies on the board render at <b>60 FPS</b> with the new models (fingers moved from capsules to boxes to claw back ~4k triangles each).</li>
+      </ul>
+      <p style="margin-top:8px"><b>Open (honest):</b> shading model is still flat cel vs PopCap's airbrushed gradients; the screen door and newspaper props need hardware/fold detail and to occlude the body; the in-game figure could sit larger on the tile.</p>
+    </div>
+  </div>
+
+  <div class="live" style="margin-top:26px">PREVIOUS — GAMEPLAY GAUNTLET 2 (SHIPPED)</div>
+  <h1 style="font-size:24px">Angle+Power Ballistics · Zoomed Field · Sunset Horizon · Difficulty Tiers</h1>
   <div class="sub">Builder/critic gauntlet on real browser gameplay · <span class="bar">Bar: Bloons TD 6 (shots/ref_btd6/*.jpg, blind A/B, labels stripped)</span> · all mechanics probe-verified</div>
 
   <div class="card good">

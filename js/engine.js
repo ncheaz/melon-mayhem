@@ -31,6 +31,9 @@ class Input {
       const r = canvas.getBoundingClientRect();
       this.mx = (e.clientX - r.left) * (canvas.width / r.width);
       this.my = (e.clientY - r.top) * (canvas.height / r.height);
+      // RAW canvas coords, never remapped — 3D mode re-encodes `mx` below, so
+      // any screen-space UI (buttons, hover) must read these instead.
+      this.rawMx = this.mx; this.rawMy = this.my;
       // 3D mode: the aim reads board-u through the real camera — unproject
       // the pointer ray onto the ground plane, then re-encode as the screen x
       // the pult's lane would show it at (row-independent with a yaw-free cam)
@@ -42,6 +45,9 @@ class Input {
     canvas.addEventListener('mousedown', e => {
       e.preventDefault();
       G.Audio.unlock();
+      const r = canvas.getBoundingClientRect();
+      this.rawMx = (e.clientX - r.left) * (canvas.width / r.width);
+      this.rawMy = (e.clientY - r.top) * (canvas.height / r.height);
       if (e.button === 0) { this.lmb = true; this.lmbPressed = true; }
       if (e.button === 2) { this.rmb = true; this.rmbPressed = true; }
     });
@@ -131,6 +137,28 @@ G.POWER = {
   rampT: 1.1,    // seconds 0→1
   dwellT: 0.5,   // seconds held at max before resetting to 0
 };
+/* ---------------- Catapult arm angles ----------------
+   One convention, shared by all three places that need to agree: the 2D
+   sprite painter, the 3D rig, and the point the melon actually leaves from.
+
+     a = 0        arm horizontal, pointing at the field
+     a > 0        tip raised FORWARD and UP
+     a < 0        tip swung BACK and DOWN
+
+   Canvas rotate() is inverted relative to this (canvas +y points down), so
+   the 2D painter is handed -a. Getting this wrong is what made the arm swing
+   backwards on one render path and the melon leave from the wrong point.
+
+   Cycle: idle/charging winds REST → COCK (smooth, charge-driven), the release
+   whips COCK → LAUNCH in `stroke` seconds, then eases LAUNCH → REST. */
+G.PULT_ARM = {
+  rest: 0.95,     // ready pose: scoop up-forward, melon loaded high
+  cock: -2.50,    // wound back and LOW
+  launch: 1.30,   // forward and HIGH — the melon leaves the scoop here
+  stroke: 0.07,   // s, power stroke (fast enough to read as a whip)
+  settle: 0.50,   // s, return to the ready pose
+};
+
 G.shotCalc = function (thetaDeg, speed) {
   const B = G.Board;
   const th = M.clamp(thetaDeg, G.ANGLE_MIN, G.ANGLE_MAX) * Math.PI / 180;

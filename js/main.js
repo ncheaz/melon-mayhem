@@ -6,6 +6,10 @@
 (function () {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  // SHORT GAME is the DEFAULT: two stages, a Don in each (stage 1 the
+  // plain Don, stage 2 the FINAL capped Don + parade + THE END).
+  // ?short=0 opts into the FULL 5-stage campaign.
+  G.SHORT = new URLSearchParams(location.search).get('short') !== '0';
   if (G.IS3D) {
     try { G.R3.init(document.getElementById('game3d')); }
     catch (e) { console.error('3D init failed, falling back to 2D:', e); G.IS3D = false; }

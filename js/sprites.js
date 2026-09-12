@@ -165,7 +165,21 @@
       ctx.stroke();
       if (glow > 0) {
         ctx.globalAlpha = glow;
-        ell(ctx, 0, 0, r * 1.45, r * 1.35, 'rgba(255,230,90,0.4)', null, 0);
+        ell(ctx, 0, 0, r * 2.3, r * 2.05, 'rgba(255,204,40,0.42)', null, 0);
+        // white-hot core over saturated yellow — a bloom that OWNS the melon
+        if (glow > 0.45) {
+          ell(ctx, 0, 0, r * 1.6, r * 1.45, 'rgba(255,232,92,0.6)', null, 0);
+          ell(ctx, 0, 0, r * 1.18, r * 1.08, 'rgba(255,250,214,0.75)', null, 0);
+          // radiating flare ticks — reads as ENERGY on the melon, not a lamp
+          ctx.strokeStyle = 'rgba(255,244,180,0.9)'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+          for (let a = 0; a < 6; a++) {
+            const ang = a * Math.PI / 3 + performance.now() / 600;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(ang) * r * 1.45, Math.sin(ang) * r * 1.32);
+            ctx.lineTo(Math.cos(ang) * r * 2.0, Math.sin(ang) * r * 1.8);
+            ctx.stroke();
+          }
+        }
         ctx.globalAlpha = 1;
       }
     }
@@ -187,8 +201,10 @@
     ctx.rotate(lean + hopSquash * 0.14);
 
     // -- throwing arm painter: pivot (0,-74). LOAD-BEARING: scoop rest (58,-6).
+    // armAng arrives already in canvas convention (world angle negated by the
+    // caller): positive = tip swung BACK and low, negative = tip raised forward.
     // Painted BEHIND the body when swung back past the face (no impalement read). --
-    const armRot = armAng - recoil * 0.55;
+    const armRot = armAng;
     const paintArm = () => {
       ctx.save();
       ctx.translate(0, -74);
@@ -232,7 +248,7 @@
       }
       ctx.restore();
     };
-    const armBehind = armRot < -1.4;
+    const armBehind = armRot > 1.4;
     if (armBehind) paintArm();
 
     // -- planter pot: banded wooden tub with soil mound --
@@ -304,6 +320,20 @@
 
     // -- throwing arm (front placement unless it was painted behind) --
     if (!armBehind) paintArm();
+
+    // STRONG THROW read: when the arm is wound back past the body the melon
+    // (and its glow halo) hides BEHIND the pot — exactly where the glow
+    // window opens. Re-paint the melon itself on top so "the melon is
+    // glowing" stays visible through the whole wind-up.
+    if (armBehind && glow > 0 && opts.holding) {
+      ctx.save();
+      ctx.translate(0, -74);
+      ctx.rotate(armRot);
+      ctx.translate(58, -6);
+      const gr = 13 + charge * 3 + Math.sin(performance.now() / 90) * charge;
+      drawMelon(ctx, gr, glow, heavy, 0);
+      ctx.restore();
+    }
 
     ctx.restore(); // pult
   }
@@ -479,8 +509,12 @@
     // -- helmet (dented metal dome) --
     if (z.helmet) {
       ctx.save();
+      // multi-hit armour (the bucket) visibly TILTS as its hits drain — the
+      // armour itself is the health bar, not just the pip strip
+      const haHits = z.headArmorHits || 1;
+      const dmg = haHits > 1 ? 1 - ((z.helmetHits == null ? haHits : z.helmetHits) / haHits) : 0;
       ctx.translate(0, hy - 4);
-      ctx.rotate(z.helmetWobble || 0);
+      ctx.rotate((z.helmetWobble || 0) + dmg * 0.3);
       ctx.beginPath();
       ctx.arc(0, 0, 15.5 * bw, Math.PI * 1.02, Math.PI * 1.98);
       ctx.closePath();
@@ -493,13 +527,30 @@
       ctx.beginPath(); ctx.arc(0, 2, 12 * bw, Math.PI * 1.18, Math.PI * 1.42); ctx.stroke();
       ctx.restore();
       ctx.strokeStyle = OUT; ctx.lineWidth = 3.5; ctx.stroke();
+      // multi-hit armour beats in: a darkening wash over the whole dome
+      if (dmg > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, 15.5 * bw, Math.PI * 1.02, Math.PI * 1.98);
+        ctx.closePath(); ctx.clip();
+        ctx.fillStyle = `rgba(28,32,38,${0.45 * dmg})`;
+        ctx.fillRect(-17 * bw, -18, 34 * bw, 22);
+        ctx.restore();
+      }
       // rim + handle nub
       ctx.strokeStyle = PAL.iron.light; ctx.lineWidth = 2.4;
       ctx.beginPath(); ctx.moveTo(-14 * bw, 1.5); ctx.lineTo(14 * bw, 1.5); ctx.stroke();
       nail(ctx, 0, -14 * bw, 2);
-      // dents grow with hits
-      for (let i = 0; i < (z.dents || 0); i++) {
-        shadedEll(ctx, -8 + i * 9, -8 + (i % 2) * 4, 3, 2.2, '#5a626b', '#454c54', '#788089', OUT, 1.5);
+      // dents grow with hits — BIG 2×2 pocks so the bucket itself narrates
+      // the countdown; the last two hits SCORCH the metal
+      const nd = Math.min(z.dents || 0, 4);
+      for (let i = 0; i < nd; i++) {
+        shadedEll(ctx, -9 + (i % 2) * 18, -11 + Math.floor(i / 2) * 9, 5.6, 4, '#3f464e', '#2e343a', '#5a626b', OUT, 2);
+      }
+      if (haHits > 1 && (z.helmetHits == null ? haHits : z.helmetHits) <= 2) {
+        ctx.globalAlpha = 0.6;
+        shadedEll(ctx, 4, -2, 10.5, 7, '#3c434b', '#2c3238', '#565e66', null, 0);
+        ctx.globalAlpha = 1;
       }
       ctx.restore();
     }
@@ -573,6 +624,11 @@
 
   /* ================= TOMBSTONE ================= */
   function drawTombstone(ctx, dmg) {
+    // Proportional to the cast: authored ×1.4 so the stone stands ≈106px —
+    // 0.54× a walker's 195px, the PvZ gravestone read (it used to be a 76px
+    // pebble at 0.39×). STONE_BLOCK_H in game.js is this same height in
+    // Board units, so the hitbox tracks the art.
+    ctx.scale(1.4, 1.4);
     poly(ctx, [[-26, 0], [26, 0], [22, -8], [-22, -8]], '#7a8272');
     ctx.beginPath();
     ctx.moveTo(-24, -6);
@@ -619,23 +675,34 @@
     sky.addColorStop(0.87, '#f2954e');
     sky.addColorStop(1, '#ffd98a');
     x.fillStyle = sky; x.fillRect(0, 0, 1280, 152);
-    // setting sun half-sunk toward the horizon, warm glow + rays
-    const sunX = 1010, sunY = 116;
-    const sg2 = x.createRadialGradient(sunX, sunY, 8, sunX, sunY, 100);
-    sg2.addColorStop(0, 'rgba(255,214,140,0.95)');
-    sg2.addColorStop(0.4, 'rgba(255,178,110,0.5)');
+    // Setting sun, sitting ABOVE the far ridge rather than half-buried in it.
+    // x 650 keeps it clear of the cloud at 560 and of the windmill at 1092,
+    // and y 86 puts the whole disc above the ridge line (≈121 there).
+    const sunX = 650, sunY = 86;
+    const sg2 = x.createRadialGradient(sunX, sunY, 10, sunX, sunY, 92);
+    sg2.addColorStop(0, 'rgba(255,226,158,0.9)');
+    sg2.addColorStop(0.45, 'rgba(255,186,114,0.42)');
     sg2.addColorStop(1, 'rgba(255,178,110,0)');
     x.fillStyle = sg2;
-    x.beginPath(); x.arc(sunX, sunY, 100, 0, TAU); x.fill();
-    x.strokeStyle = 'rgba(255,196,120,0.55)'; x.lineWidth = 3; x.lineCap = 'round';
+    x.beginPath(); x.arc(sunX, sunY, 92, 0, TAU); x.fill();
+    x.strokeStyle = 'rgba(255,200,126,0.42)'; x.lineWidth = 2.6; x.lineCap = 'round';
     for (let i = 0; i < 12; i++) {
       const a = i / 12 * TAU + 0.26;
       x.beginPath();
-      x.moveTo(sunX + Math.cos(a) * 44, sunY + Math.sin(a) * 44);
-      x.lineTo(sunX + Math.cos(a) * (55 + (i % 2) * 8), sunY + Math.sin(a) * (55 + (i % 2) * 8));
+      x.moveTo(sunX + Math.cos(a) * 38, sunY + Math.sin(a) * 38);
+      x.lineTo(sunX + Math.cos(a) * (48 + (i % 2) * 8), sunY + Math.sin(a) * (48 + (i % 2) * 8));
       x.stroke();
     }
-    shadedEll(x, sunX, sunY, 30, 30, '#ffd98a', '#f08a3c', '#fff0c0', '#d8682f', 3);
+    // disc: hot core, defined limb
+    const dg2 = x.createRadialGradient(sunX, sunY - 8, 4, sunX, sunY, 30);
+    dg2.addColorStop(0, '#fffdf2');
+    dg2.addColorStop(0.55, '#fff0c0');
+    dg2.addColorStop(0.86, '#ffd98a');
+    dg2.addColorStop(1, '#ffb463');
+    x.fillStyle = dg2;
+    x.beginPath(); x.arc(sunX, sunY, 29, 0, TAU); x.fill();
+    x.strokeStyle = 'rgba(255,188,108,0.9)'; x.lineWidth = 2.2;
+    x.beginPath(); x.arc(sunX, sunY, 29, 0, TAU); x.stroke();
     // clouds — painterly puffs tinted by the sunset, three depths
     const cloud = (cx, cy, s, shade) => {
       x.save(); x.translate(cx, cy); x.scale(s, s);
@@ -671,6 +738,24 @@
     x.quadraticCurveTo(1220, 118, 1280, 124);
     x.lineTo(1280, 152); x.lineTo(0, 152);
     x.closePath(); x.fill();
+    // sun-facing rim on the far ridge: the peaks catch the light spilling
+    // over them, brightest directly under the sun
+    {
+      const rimG = x.createLinearGradient(sunX - 330, 0, sunX + 330, 0);
+      rimG.addColorStop(0, 'rgba(255,198,124,0)');
+      rimG.addColorStop(0.42, 'rgba(255,216,150,0.32)');
+      rimG.addColorStop(0.5, 'rgba(255,236,182,0.9)');
+      rimG.addColorStop(0.58, 'rgba(255,216,150,0.32)');
+      rimG.addColorStop(1, 'rgba(255,198,124,0)');
+      x.strokeStyle = rimG; x.lineWidth = 2.6; x.lineJoin = 'round';
+      x.beginPath();
+      x.moveTo(0, 136);
+      x.quadraticCurveTo(180, 112, 380, 130);
+      x.quadraticCurveTo(560, 114, 760, 128);
+      x.quadraticCurveTo(960, 116, 1140, 126);
+      x.quadraticCurveTo(1220, 118, 1280, 124);
+      x.stroke();
+    }
     // far treeline specks on the far ridge
     x.fillStyle = '#7d8f56';
     for (const [tx, ty] of [[90, 130], [150, 124], [430, 128], [520, 122], [820, 126], [890, 121], [1180, 124]]) {
@@ -705,21 +790,27 @@
       shadedEll(x, 9, 6, 8, 9, '#4f8f3e', '#2f5f2a', '#7abf60', null, 0);
       x.restore();
     };
-    tree(95, 122, 2.1);    // left corner — canopy peeks over the cottage roof
-    tree(150, 130, 1.4);
-    tree(1243, 120, 2.2);  // right corner — canopy peeks over the graveyard wall
-    tree(1196, 132, 1.3);
+    tree(78, 118, 4.2);    // left corner — big canopy over the cottage roof
+    tree(126, 134, 2.6);
+    tree(1268, 120, 4.4);  // right corner — big canopy over the graveyard wall
+    tree(1226, 132, 2.6);
     // low shrubs hug the fence line (bottoms ≤ y196 — never over the field)
     for (const [sx2, ss] of [[250, 0.8], [420, 0.6], [660, 0.75], [900, 0.6], [1080, 0.8]]) {
       shadedEll(x, sx2, 190, 12 * ss + 6, 8 * ss + 4, '#4f8f3e', '#2f5f2a', '#7abf60', null, 0);
     }
-    // tiny far windmill on the near ridge (KR flavor) — far right corner
+    // far windmill on the ridge — scaled so it reads as a landmark at the
+    // horizon rather than a speck (it used to be ~36px, a quarter of a zombie)
     x.save();
-    x.translate(1102, 168);
+    x.translate(1092, 170);
+    x.scale(1.75, 1.75);
     poly(x, [[-7, 0], [7, 0], [4, -22], [-4, -22]], '#c9b48a', null, 0);
     poly(x, [[-4, -22], [4, -22], [0, -32]], '#8a6a44', null, 0);
     x.strokeStyle = '#6b4f2e'; x.lineWidth = 2;
     x.beginPath(); x.moveTo(0, -26); x.lineTo(10, -22); x.moveTo(0, -26); x.lineTo(8, -32); x.moveTo(0, -26); x.lineTo(-2, -36); x.moveTo(0, -26); x.lineTo(-9, -21); x.stroke();
+    // door + cap so it reads as a building
+    x.fillStyle = '#5a4026'; x.fillRect(-2.5, -6, 5, 6);
+    x.strokeStyle = '#6b4f2e'; x.lineWidth = 1.2;
+    x.beginPath(); x.moveTo(-5, -22); x.lineTo(0, -19); x.lineTo(5, -22); x.stroke();
     x.restore();
     // meadow band between hills and lawn (soft transition into the fence)
     const mg = x.createLinearGradient(0, 196, 0, 218);
@@ -1036,5 +1127,10 @@
     return c;
   }
 
-  G.Sprites = { drawMelon, drawPult, drawZombie, drawTombstone, bakeBackground, drawStar };
+  G.Sprites = {
+    drawMelon, drawPult, drawZombie, drawTombstone, bakeBackground, drawStar,
+    // shared chunky-vector paint kit — used by zombie_art2d.js so both
+    // files stay in one visual language
+    _paint: { poly, ell, pathPoly, shadedEll, shadedPoly, nail, PAL, OUT },
+  };
 })();

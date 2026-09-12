@@ -138,6 +138,67 @@
     uiClick() { this.osc('square', 700, 500, 0.06, 0.1); }
     jumpWhoosh() { this.noise(0.15, 0.16, 1400, 0, 'bandpass', 1.5); this.osc('sine', 300, 520, 0.14, 0.1); }
 
+    /* ---- the boss ---- */
+    bossHorn() {      // a slow, ugly two-note brass: the entrance, not a wave horn
+      this.osc('sawtooth', 98, 98, 1.1, 0.3);
+      this.osc('sawtooth', 147, 147, 1.2, 0.22, 0.04);
+      this.osc('sawtooth', 92, 92, 1.5, 0.26, 0.62);
+      this.osc('square', 73, 73, 1.8, 0.2, 0.62);
+      this.noise(1.0, 0.14, 320, 0, 'lowpass');
+    }
+    bossThud(top) {
+      // every hit lands like a hammer on a barrel; a high arc lands like two
+      this.noise(0.16, top ? 0.5 : 0.32, 420, 0, 'lowpass');
+      this.osc('sine', top ? 74 : 96, 34, top ? 0.36 : 0.22, top ? 0.55 : 0.36);
+      if (top) this.osc('square', 168, 60, 0.14, 0.16, 0.01);
+    }
+    bossPhase() {
+      // the headwear comes off: crack, then a rising squeal
+      this.noise(0.3, 0.45, 2600, 0, 'highpass');
+      this.osc('sawtooth', 240, 900, 0.4, 0.22);
+      this.osc('sine', 60, 30, 0.6, 0.4, 0.05);
+    }
+    bossDown() {
+      [196, 175, 147, 98, 73].forEach((f, i) => this.osc('sawtooth', f, f * 0.92, 0.7, 0.26, i * 0.22));
+      this.osc('sine', 55, 26, 2.2, 0.5, 1.0);
+      this.noise(1.4, 0.25, 260, 1.0, 'lowpass');
+    }
+    /* ---- the last flight (see Game.updateDonFlight) ---- */
+    heliIn() {
+      // blade slap coming down THROUGH the arrival — the gaps tightening
+      [0, 0.22, 0.4, 0.54, 0.66, 0.76, 0.84].forEach((d, i) => {
+        this.noise(0.09, 0.16 + i * 0.02, 320, d, 'lowpass');
+        this.osc('sine', 62 - i * 2, 52, 0.1, 0.1, d);
+      });
+      this.osc('sawtooth', 220, 300, 0.9, 0.05, 0.1);   // turbine whine
+    }
+    harnessPop() {
+      this.osc('square', 900, 220, 0.08, 0.22);
+      this.noise(0.08, 0.3, 2600, 0, 'bandpass', 2);
+    }
+    fallWhistle() {
+      this.osc('sine', 1500, 260, 0.85, 0.16, 0, 'exp');
+      this.osc('sine', 2000, 340, 0.85, 0.07, 0.02, 'exp');
+    }
+    crashBoom() {
+      this.noise(1.1, 0.55, 900, 0, 'lowpass');
+      this.noise(0.5, 0.4, 3000, 0, 'highpass');
+      this.osc('sine', 130, 30, 1.2, 0.6);
+      this.osc('sawtooth', 90, 28, 0.9, 0.3, 0.02);
+      this.noise(1.6, 0.18, 220, 0.25, 'lowpass');
+    }
+    fireworkBurst(night) {
+      this.noise(night ? 0.5 : 0.34, night ? 0.42 : 0.3, night ? 1900 : 1500, 0, 'highpass');
+      this.osc('sine', night ? 90 : 130, 40, 0.4, 0.3);
+      if (night) this.noise(0.7, 0.2, 900, 0.06, 'bandpass', 1.2);
+    }
+    fanfare(big) {
+      const notes = big ? [523, 659, 784, 1047, 1319, 1568, 2093] : [392, 523, 659, 784, 1047];
+      notes.forEach((f, i) => this.osc('triangle', f, f, big ? 0.42 : 0.3, 0.17, i * (big ? 0.16 : 0.13)));
+      this.osc('sawtooth', big ? 131 : 98, big ? 131 : 98, 1.4, 0.16, 0.2);
+      if (big) this.noise(2.0, 0.14, 2200, 0.5, 'highpass');
+    }
+
     /* ---- ambience driven by game state ---- */
     ambience(dt, walkingZombies, aliveZombies) {
       if (!this.ctx || this.muted) return;
