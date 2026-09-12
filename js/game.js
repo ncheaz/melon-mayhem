@@ -85,11 +85,13 @@
 
   /* ---------- THE DON'S LAST WORDS ----------
      When he drops he does not just vanish: still on his feet he RAMBLES —
-     five random messages, incoherent and merciless, each bubble somewhere
+     three random messages, incoherent and merciless, each bubble somewhere
      new around him — then thinks one last impossible thought, and only
-     then tips over slowly while the lawn shakes, and lies where he lands. */
+     then does the exit take him (the chopper, or the ground itself). */
   const DONFALL_MSG_T = 5;        // seconds per ramble bubble — time to read it
   const DONFALL_THOUGHT_T = 5.5;  // the last, incoherent thought lingers this long
+  const COLLAPSE_T = 1.8;         // the first Don folds to the turf this fast
+  const COLLAPSE_SETTLE_T = 0.5;  // ...and bounces to rest before the thought
   /* ---------- THE LAST FLIGHT ----------
      He is not tipped over and he is not swallowed: a helicopter hooks him,
      hauls him off his feet and out of the frame, flies him away to the
@@ -106,25 +108,40 @@
   const HELI_DROP_T = 1.5;    // the buckle lets go and he falls
   const HELI_FOLLOW_T = 2.6;  // the chopper comes down after him
   const HELI_SMOKE_T = 1.8;   // and the lawn smokes where they landed
+  /* THE PICKUP LINE rides the rope for THREE seconds: it pops in just before
+     the harness snaps on (the last 0.15 s of the hook) and pops out a beat
+     into the haul-away — 0.15 + lift 2.2 + 0.65 ≈ 3 s, then it is gone. The
+     old gate read the DROP instead and hung the line over the whole flight. */
+  const HELI_LINE_HOOKK = 0.85;
+  const HELI_LINE_CARRYK = 0.27;   // 0.65 s into the 2.4 s away leg
   /* ---------- THE SWALLOW (the FINAL boss only) ----------
      No chopper at all: the lawn opens under him, he goes down into it, and
      the ground throws fire, rock and lava back up for ten full seconds
      before it closes over him. The flames are game-side particles drawn on
      the shared overlay, so the 2D path and the 3D path show the same thing. */
   const SWALLOW_OPEN_T = 0.9;     // the ground gapes open this fast
-  const SWALLOW_SINK_T = 1.4;     // and takes him under over this long
+  const SWALLOW_SINK_AT = 0.55;   // in he goes, once the mouth is most of the way open
+  const SWALLOW_SINK_T = 4.2;     // a THIRD of the old 1.4s — a slow, deliberate swallow
   const SWALLOW_FIRE_T = 10.0;    // TEN FULL SECONDS of it before the ground shuts
   const SWALLOW_CLOSE_T = 0.8;    // how long the hole takes to sew itself up
   const SWALLOW_TOTAL = SWALLOW_FIRE_T + SWALLOW_CLOSE_T + 0.3;
   const SWALLOW_SPEW_T = 0.55;    // seconds between rocks / lava launches
+  // his last thought does not ride the dialog: it drifts up out of the HOLE,
+  // once he is all the way under and the ground is already spitting chunks
+  const SWALLOW_THOUGHT_AT = SWALLOW_SINK_AT + SWALLOW_SINK_T + 0.9;
+  const SWALLOW_HOLE_THOUGHT_T = Math.min(DONFALL_THOUGHT_T,
+    SWALLOW_TOTAL - 0.25 - SWALLOW_THOUGHT_AT);
   /* ...and after the ground sews itself shut, one last card before the chase:
      THE DON IS <term> — the term rolled fresh every run from DON_COOKED — a
-     sarcastic sub-line under it, and ten full seconds to read it in peace. */
-  const SEEYA_T = 10;             // the good-riddance card lingers this long
+     sarcastic sub-line under it, and five seconds to read before the horde
+     comes marching back out. */
+  const SEEYA_T = 5;              // the good-riddance card lingers this long
   const DON_COOKED = [
     'WELL DONE', 'EXTRA CRISPY', 'FULLY ROASTED', 'MEDIUM-RARE',
     'CHAR-BROILED', 'FLAMBÉED', 'TOASTED', 'COOKED',
     'BURNT TO A CRISP', 'A SMOKING CRATER', 'REDUCED TO ASH', 'A PUBLIC ROAST',
+    'WELL AND TRULY DONE', 'PRESSED INTO PULP', 'PRESSURE-COOKED',
+    'SLOW-ROASTED', 'SERVED COLD', 'GRILLED, THEN BILLED',
   ];
   const SEEYA_SUBS = [
     'The lawn has never looked better. The tomatoes sent a card.',
@@ -133,11 +150,187 @@
     'The crows are already calling it their favorite episode.',
     'He said he would be back. The ground said: no.',
     'Rug: fake. Cap: confiscated. Don: done.',
+    'The worms filed a restraining order at the ninety-foot mark.',
+    'The lava asked for a transfer. Anywhere. It has standards.',
+    'His library will be a pamphlet. Mostly coupons.',
+    'History will remember a footnote with a comb-over.',
+    'The fire marshal rated his legacy: "does not meet code."',
+    'The ground kept the receipt. No refunds.',
+    'He wanted a legacy. He got a landfill.',
+    'The hole was the only thing proud to hold him.',
+    'Approval rating underground: still zero. Consistency!',
+    'The fire asked for his résumé, then burned it.',
+    'Even the crows say he’s the best thing that ever fell in.',
+    'The tomatoes sent a card. It was not sympathetic.',
+  ];
+  const SEEYA_KICKERS = [
+    '— AN OFFICIAL LAWN ANNOUNCEMENT —',
+    '— A MESSAGE FROM THE GARDEN —',
+    '— DEPT. OF AGRICULTURE, FINAL RULING —',
+    '— THE HOLE HAS SPOKEN —',
+    '— CERTIFIED BY THE COMPOST BOARD —',
+    '— FILED UNDER: GOOD RIDDANCE —',
+  ];
+  const SEEYA_BYES = [
+    'GOOD RIDDANCE — SEE YA, DON!',
+    'DON’T LET THE HOLE HIT YOU ON THE WAY DOWN.',
+    'THE BEST GOODBYE. EVERYBODY SAYS SO.',
+    'FAREWELL, YOU TANGERINE TRAGEDY.',
+    'OUTSHOT BY A PULT. FOREVER.',
+    'GONE. LIKE HIS MONEY.',
   ];
   /* The roast's big finish: the verdict line is set in a calligraphic script,
      HUGE, and it vibrates with rage — the one line the report builds to. */
   const FIRED_TXT = 'YOU ARE FIRED.';
   const FIRED_FONT = '"Brush Script MT","Segoe Script","Lucida Handwriting","Apple Chancery","URW Chancery L","Z003",cursive';
+  /* ================= THE TAUNT BANKS =================
+     Everything the lawn says once the Don is down — the scrolling report,
+     the good-riddance card, the end screen — is rolled FRESH from these
+     banks on every single run, so no two defeats read the same. The
+     register is fixed: loud, merciless, and very funny. The neighbors have
+     waited five whole stages for this, and they are not holding back.
+
+     In the report exactly TWO lines never change — the verdict and the
+     pult’s sign-off — because the report builds to the first and lands on
+     the second. Everything else is dealt off the top of the deck. */
+  const ROAST_EDITIONS = [
+    '— special evening edition —',
+    '— late extra: the lawn reacts —',
+    '— victory edition, all caps —',
+    '— the garden gazette, final word —',
+    '— published once, cherished forever —',
+    '— printed on 100% recycled campaign promises —',
+  ];
+  const ROAST_STATUS = [
+    [['The undead horde: HERDED. The Don: DONE.', 26, '#f4f2e6']],
+    [['Lawn attendance: record high.', 24, '#f4f2e6'], ['Don approval: record low. Again.', 24, '#f4f2e6']],
+    [['One garden. One pult. One spectacular collapse.', 26, '#f4f2e6']],
+    [['Tonight’s forecast: falling cap,', 24, '#f4f2e6'], ['100% chance of DONE.', 24, '#f4f2e6']],
+    [['The biggest crowd this lawn ever drew —', 24, '#f4f2e6'], ['and every single one came to watch him lose.', 24, '#f4f2e6']],
+    [['The garden stood up. The Don went down.', 26, '#f4f2e6'], ['Physics voted first. It voted melon.', 24, '#f4f2e6']],
+    [['A local vegetable just achieved what entire', 24, '#f4f2e6'], ['agencies could not. Polls are calling it "huge." ', 24, '#f4f2e6']],
+  ];
+  const ROAST_SECTIONS = [
+    // ---- the wall that never was ----
+    [['He promised a wall around the garden.', 24, '#cfe8c2'], ['We built him a compost heap instead.', 24, '#cfe8c2']],
+    [['He said the melons were paying for the wall.', 24, '#cfe8c2'], ['The melons declined. Loudly. At high speed.', 24, '#cfe8c2']],
+    [['The wall remains unbuilt, unpaid,', 24, '#cfe8c2'], ['and now also on fire.', 24, '#cfe8c2']],
+    // ---- the hair ----
+    [['His cap was confiscated at the lawn line.', 24, '#ffe9a0'], ['His rug? Blown clean off. Fake hair. Real losses.', 24, '#ffe9a0']],
+    [['Scientists studied the swoop for six hours.', 24, '#ffe9a0'], ['Conclusion: gravity, but personally offended.', 24, '#ffe9a0']],
+    [['The wind took one look at that quiff', 24, '#ffe9a0'], ['and took it personally.', 24, '#ffe9a0']],
+    [['The rug survived the fall intact.', 24, '#ffe9a0'], ['It has already been offered a better job.', 24, '#ffe9a0']],
+    // ---- the cap ----
+    [['The red cap read MAKE HIM GONE.', 24, '#ffe9a0'], ['The lawn agreed. Unanimously.', 24, '#ffe9a0']],
+    [['He wore the cap. The cap asked', 24, '#ffe9a0'], ['to retire after this one. It has seen enough.', 24, '#ffe9a0']],
+    // ---- the melons ----
+    [['No collusion — just collision,', 24, '#b9ff2e'], ['with melons, at terminal velocity.', 24, '#b9ff2e']],
+    [['Special counsel: one melon.', 24, '#b9ff2e'], ['Findings: direct. Repeated. Delicious.', 24, '#b9ff2e']],
+    [['He tried to grab the harvest by the stem.', 24, '#b9ff2e'], ['The harvest grabbed back. At 45 degrees. Twice.', 24, '#b9ff2e']],
+    [['The melons never read his speeches.', 24, '#b9ff2e'], ['They simply answered them.', 24, '#b9ff2e']],
+    [['Every shot landed like a subpoena.', 24, '#b9ff2e'], ['He ignored them all equally.', 24, '#b9ff2e']],
+    // ---- the courts ----
+    [['Impeached by artillery. Convicted by squash.', 26, '#ff9e3d']],
+    [['The jury: nine kinds of undead.', 24, '#ff9e3d'], ['The verdict: yes. All of it. Immediately.', 24, '#ff9e3d']],
+    [['His defense: "I hardly know the melon."', 24, '#ff9e3d'], ['The melon: "He’s lying." Everyone believed the melon.', 24, '#ff9e3d']],
+    [['Indicted on forty counts of standing there', 24, '#ff9e3d'], ['smugly. Forty convictions. A perfect record!', 24, '#ff9e3d']],
+    [['The appeals court is a scarecrow.', 24, '#ff9e3d'], ['The scarecrow is not moved. Literally.', 24, '#ff9e3d']],
+    // ---- the money ----
+    [['He billed the garden for the invasion.', 24, '#f4f2e6'], ['The garden sent back this report instead.', 24, '#f4f2e6']],
+    [['Six bankruptcies. One lawn.', 24, '#f4f2e6'], ['The lawn is somehow still richer.', 24, '#f4f2e6']],
+    [['He tried to trademark the victory.', 24, '#f4f2e6'], ['The victory politely declined to be his.', 24, '#f4f2e6']],
+    // ---- the golf ----
+    [['His golf cart fled the scene early.', 24, '#cfe8c2'], ['It has since applied for asylum. Granted.', 24, '#cfe8c2']],
+    [['He lost a full round to farm equipment', 24, '#cfe8c2'], ['playing from the rough. The vegetable rough.', 24, '#cfe8c2']],
+    // ---- the hole ----
+    [['The ground opened early. Even the dirt', 24, '#f4f2e6'], ['saw him coming and braced itself.', 24, '#f4f2e6']],
+    [['The hole charged him rent on the way down.', 24, '#f4f2e6'], ['The first landlord to ever collect.', 24, '#f4f2e6']],
+    [['The lava asked for a transfer.', 24, '#f4f2e6'], ['Anywhere. Immediately. It has standards.', 24, '#f4f2e6']],
+    // ---- the legacy ----
+    [['Two tours of this garden. Two total wipeouts. SAD!', 26, '#ff9e3d']],
+    [['He had the best words.', 24, '#ff9e3d'], ['The melons had the best trajectories.', 24, '#ff9e3d']],
+    [['He wanted a monument.', 24, '#ff9e3d'], ['The lawn gave him a scorch mark and a smell.', 24, '#ff9e3d']],
+    [['Historians will call it "the incident', 24, '#ff9e3d'], ['with the vegetable." All of it. Just that.', 24, '#ff9e3d']],
+    [['In the end he lost, decisively,', 24, '#ff9e3d'], ['to farm equipment. In a garden. In public.', 24, '#ff9e3d']],
+    // ---- the garden’s verdict on all of it ----
+    [['The roses called it "a cleansing."', 24, '#cfe8c2'], ['The weeds called it "overdue."', 24, '#cfe8c2']],
+    [['The compost has opinions now.', 24, '#cfe8c2'], ['All of them are mean. All of them are fair.', 24, '#cfe8c2']],
+  ];
+  const ROAST_VERDICT_LEAD = [
+    'The Melon-Pult has spoken:',
+    'The garden’s ruling is final:',
+    'The Harvest Court has reached a verdict:',
+    'By order of the lawn, the squash, and the pult:',
+    'The official record states, in part:',
+    'After two invasions, one hole, and zero excuses:',
+  ];
+  const ROAST_AFTERMATH = [
+    'The graveyard is empty. The tomatoes stand tall.',
+    'The melons rest easy. The brains remain uneaten.',
+    'The lawn is greener now. Suspiciously greener. Worth it.',
+    'The fence is being repainted over the scorch. Today.',
+    'The crows wrote a ballad. It is not a kind one.',
+    'The gnomes stood and applauded. All night. In the rain.',
+    'The birdbath still smells faintly of bronzer.',
+    'The scarecrow applied for his old job. It went great.',
+    'Somewhere below, he is still explaining how he won.',
+  ];
+  /* THE END screen — the frame never changes (CONGRATULATIONS … THE END),
+     but the sub-headline, the quip and the sign-off are dealt fresh. */
+  const END_HEADS = [
+    'THE DON IS GONE FOR GOOD. CAP OFF. RUG OFF. GONE.',
+    'THE DON IS GONE. THE LAWN IS SAFE. THE TAN IS ELSEWHERE.',
+    'HE CAME. HE SWAYED. HE GOT PULTED. TWICE.',
+    'GONE LIKE A PROMISE AT BILLING TIME.',
+    'TWO DONS ENTERED A GARDEN. ZERO MATTERED.',
+    'HISTORIC LOSS. THE BIGGEST. EVERYONE AGREES.',
+    'THE GARDEN SLEPT GREAT, ACTUALLY.',
+  ];
+  const END_QUIPS = [
+    'He demanded a rematch. The hole declined.',
+    'His final statement was just the sound of falling.',
+    'Somewhere below, he is still explaining how he won.',
+    'The melons have unionized. First rule: no Dons.',
+    'Historians agree: the funniest possible outcome.',
+    'Even the fence feels taller now.',
+    'The worms returned his application. Unopened.',
+    'He will be remembered — briefly, unkindly, accurately.',
+    'The scarecrow got his parking spot by lunchtime.',
+  ];
+  const END_THANKS = [
+    'Thanks for playing MELON MAYHEM. The Don is unavailable for comment.',
+    'Thanks for playing MELON MAYHEM. Zero brains lost. One ego destroyed.',
+    'Thanks for playing MELON MAYHEM. The melons will remember your aim.',
+    'Thanks for playing MELON MAYHEM. A vegetable did that to him. A vegetable.',
+    'Thanks for playing MELON MAYHEM. Pult responsibly.',
+    'Thanks for playing MELON MAYHEM. He is never coming back. Probably.',
+  ];
+  /* Deal the report: header + edition + status, FIVE sections drawn
+     without replacement from the bank, the verdict lead-in, the verdict,
+     two aftermath lines, and the pult’s sign-off. Rolled once per run and
+     cached by roastLines(), so the scroll can never re-deal mid-flight. */
+  function buildRoastLines() {
+    const L = [];
+    L.push(['THE NEIGHBORHOOD REPORT', 40, '#ffd23f']);
+    L.push([pick(ROAST_EDITIONS), 18, '#cfe8c2']);
+    L.push(['·', 14, '#5a6a52']);
+    for (const ln of pick(ROAST_STATUS)) L.push(ln);
+    const secs = [...ROAST_SECTIONS];
+    for (let i = secs.length - 1; i > 0; i--) {
+      const j = randi(0, i); [secs[i], secs[j]] = [secs[j], secs[i]];
+    }
+    for (const sec of secs.slice(0, 5)) for (const ln of sec) L.push(ln);
+    L.push([pick(ROAST_VERDICT_LEAD), 24, '#cfe8c2']);
+    L.push([FIRED_TXT, 76, '#ff5555']);   // the verdict: huge, calligraphic, shaking
+    L.push(['·', 14, '#5a6a52']);
+    const aft = [...ROAST_AFTERMATH];
+    for (let i = aft.length - 1; i > 0; i--) {
+      const j = randi(0, i); [aft[i], aft[j]] = [aft[j], aft[i]];
+    }
+    for (const t of aft.slice(0, 2)) L.push([t, 24, '#cfe8c2']);
+    L.push(['…and the pult? Already reloading.', 24, '#ffd23f']);
+    return L;
+  }
   /* The crash is staged UP THE LAWN, not at his feet — the flight's own drop
      depth (twice the old one) in the 3D. These two are the same statement in
      2D: where the distant ground line sits, and how big the little tragedy
@@ -153,7 +346,11 @@
     ['I HAVE A', 'TREMENDOUS HELICOPTER.', 'BIGGER. GOLD. THIS ONE', 'IS A DISASTER.'],
   ];
   const GRIPE_T = 10;             // hat/rug destruction complaint lingers a full 10 s
-  const DON_RAMBLE = [
+  /* THE RAMBLE BANKS. Each Don draws his five bubble-rants from his OWN pool:
+     the rug boss (first fight) and the cap boss (the finale) never share
+     material. Five are shuffled out of the bank every single defeat, so no
+     two eulogies read the same. */
+  const DON_RAMBLE_1 = [
     ['I OBLITERATED the army.', 'The WHOLE army.', 'Nobody obliterates', 'like me. Ask anyone.'],
     ['The plants never got the nuke.', 'I HAD the nuke. A beautiful nuke.', 'They said, sir, you can\u2019t', 'nuke the garden. WRONG!'],
     ['This melon? Total loser.', 'Throws like a little baby.', 'Very weak. SAD!'],
@@ -172,6 +369,41 @@
     ['The crows? My best crowd.', 'Massive crowd. The biggest.', 'The lawn media said eight crows.', 'THOUSANDS of crows.'],
     ['I was gonna be a farmer.', 'Best farmer. Nobody farms', 'like I farm. Ask the corn.', 'The corn LOVES me.'],
     ['This isn\u2019t over.', 'We\u2019ll be back.', 'Probably. Look busy.'],
+    ['This garden was CRIME INFESTED.', 'Total crime. Zombie crime.', 'I made it safe in one day.', 'Like I always do. ONE day.'],
+    ['The windmill? I built that.', 'They say a Dutchman built it.', 'WRONG. I built it.', 'The best windmill, maybe ever.'],
+    ['A sunflower turned away from me.', 'ONE sunflower. Disloyal.', 'The rest face me all day.', 'They know. Everybody knows.'],
+    ['I met the scarecrow.', 'Strong guy. Silent type.', 'We talked for two hours.', 'He did most of the listening.'],
+    ['My hands are huge.', 'People come up to me, they say,', 'SIR, your hands are the size', 'of shovels. It\u2019s true. Look.'],
+    ['The gardener begged me.', 'He said SIR, please, don\u2019t eat', 'the vegetable garden.', 'I ate the vegetable garden.'],
+    ['Nobody hydrates like me.', 'I drink water like nobody\u2019s', 'business. The best water.', 'Many people don\u2019t know that.'],
+    ['The fence is doing a', 'FANTASTIC job. A++ plus.', 'Fence of the year.', 'Almost as good as a wall.'],
+    ['That melon-pult kid,', 'whoever built it — genius.', 'A total genius. Not like me.', 'I\u2019m a very stable genius.'],
+    ['They spelled my name wrong', 'on the tombstone. SAD.', 'Biggest tombstone, though.', 'Tremendous tombstone. Everybody', 'says it\u2019s the biggest.'],
+    ['My rug guy is the best.', 'Honest. Tough. Never talks.', 'Never talks to ANYBODY.', 'The perfect rug guy.'],
+    ['I walked this lawn once.', 'Twenty holes in my shoes.', 'The grass apologized to me.', 'It cried. True story.'],
+    ['Everything is computer now.', 'Even the zombies. Nobody', 'computers like me.', 'I\u2019m very good at computers.'],
+  ];
+  const DON_RAMBLE_2 = [
+    ['THE GREAT COMEBACK!', 'They counted me out', 'after the compost.', 'Biggest comeback in history.', 'Everybody is saying it.'],
+    ['This cap is ONE SIZE', 'FITS ALL.', 'Like my mandate.', 'My beautiful, huge mandate.'],
+    ['I\u2019m not just a zombie.', 'I\u2019m a MOVEMENT.', 'The most handsome movement', 'in the history of movements.'],
+    ['The polls said I lose the lawn.', 'The POLLS. Fake polls.', 'Fake lawn. Fake dirt.', 'The only real thing out here', 'is me. And the cap.'],
+    ['I\u2019ll pardon myself.', 'Just watched it happen.', 'Beautiful paperwork.', 'The lawyers all said SIR,', 'you can\u2019t. WATCH ME.'],
+    ['They tried MELONFARE.', 'Total melonfare.', 'Even the tomatoes agree.', 'And the tomatoes HATE me.'],
+    ['Nobody negotiates like me.', 'I talked a fence into', 'lying down. A whole fence.', 'It\u2019s true. It\u2019s still down.'],
+    ['Rally tonight. HUGE rally.', 'Right here. This lawn.', 'Everyone\u2019s coming.', 'Not you. You\u2019re fired.'],
+    ['I know more about defeat', 'than any zombie alive.', 'Nobody gets defeated', 'like I get defeated.', 'It\u2019s a gift.'],
+    ['The wheelbarrow? My idea.', 'The shovel? Mine.', 'Compost? I was into compost', 'before it was cool.', 'Way before. Ask anybody.'],
+    ['They\u2019re eating the brains.', 'They\u2019re eating the cats.', 'They\u2019re eating the dogs', 'of the people who live here.'],
+    ['Doctors ran the tests.', 'Cognitive test. PERFECT score.', 'Person, woman, man, camera,', 'ZOMBIE. Nailed it. First try.'],
+    ['A brain came up to me.', 'Big brain. Tears in its folds.', 'It said SIR, please.', 'I said no. I\u2019m on a diet.'],
+    ['This is ELECTION', 'INTERFERENCE.', 'That melon is INTERFERING', 'with my ELECTION.', 'LOCK IT UP!'],
+    ['I\u2019ll debate the pult.', 'Any time. Any place.', 'It won\u2019t debate me.', 'It\u2019s scared. LOW ENERGY pult.'],
+    ['\u2018The Art of the Shamble.\u2019', 'My book. Best seller.', 'Tremendous book.', 'Chapter One is my favorite.'],
+    ['They spiked the melons.', 'With VICTORY. Terrible stuff.', 'Nobody spikes a melon', 'like the fake lawn media.'],
+    ['I take full responsibility', 'for the GREAT stuff.', 'The other stuff?', 'Ask the melon. It knows.'],
+    ['Two terms.', 'The best two terms in zombie', 'history. Maybe three.', 'We\u2019re looking into it.'],
+    ['You call this a defeat?', 'This is a STRATEGIC', 'LAWN RETREAT.', 'Everybody will say I won.',],
   ];
   /* What he screams the instant his look is blown. One is picked at random
      and lingers for GRIPE_T seconds — each pool is a set, the pick is a die roll. */
@@ -643,6 +875,10 @@
       this.shieldWobble = 0;
       this.gloryReady = false;
       this.holdBonus = 0;   // extra stand-still seconds banked from hits
+      // grounded — the walk advance is gated on this (a mid-jump boss pauses
+      // it). Leaving it undefined made EVERY walker freeze in place forever:
+      // `undefined >= 1` is false, so nobody ever took a step.
+      this.jumpT = 1;
 
       /* ---------------- BOSS ----------------
          The Don runs the same locomotion as every other corpse (spawn → hold
@@ -1129,6 +1365,54 @@
   }
 
   /* ================= GAME ================= */
+  /* ---------- THE DIZZY STATE ----------
+     From the beat he drops until the chopper takes him (or the ground
+     opens under him) the Don is officially DIZZY: a wobbly halo of stars
+     over his head, a slow sway that never repeats, a head that shakes in
+     gusts, and one long exaggerated blink every few seconds. Every
+     channel here is a PURE function of (donFall, time) so both render
+     paths — and any frozen probe frame — agree on the beat. */
+  G.DONDIZZY = {
+    TAU: Math.PI * 2,
+    // 1 while he rambles, fading out as the exit claims him
+    amount(d) {
+      if (!d) return 0;
+      if (d.phase === 'speech' || d.phase === 'collapse' || d.phase === 'thought') return 1;
+      if (d.phase !== 'fall') return 0;
+      // the chopper's approach, or the slow slide under the lawn — the stars
+      // stay with him until the ground is most of the way to having him
+      return d.mode === 'swallow'
+        ? Math.max(0, 1 - d.t / (SWALLOW_SINK_AT + SWALLOW_SINK_T * 0.75))
+        : Math.max(0, 1 - (d.inK || 0));
+    },
+    // the body sway: three drifting sines so it never repeats, with a slow
+    // breathing amplitude — he is swaying slowly, but ERRATICALLY
+    sway(t) {
+      return (Math.sin(t * 1.13) * 0.55 + Math.sin(t * 2.71 + 1.3) * 0.30
+        + Math.sin(t * 5.3 + 2.1) * 0.15) * (0.55 + 0.45 * Math.sin(t * 0.61 + 0.9));
+    },
+    // the head: fast little shakes that arrive in GUSTS, not on a metronome
+    head(t) {
+      const gust = 0.35 + 0.65 * Math.max(0, Math.sin(t * 0.83) * Math.sin(t * 1.97 + 0.5));
+      return (Math.sin(t * 7.9) * 0.6 + Math.sin(t * 11.3 + 1.1) * 0.4) * gust;
+    },
+    // the blink: one long shut-eye every 2.7 s (1 = fully shut)
+    blink(t) {
+      const W = 0.46, ph = t % 2.7;
+      return ph >= W ? 0 : Math.sin((ph / W) * Math.PI);
+    },
+    // one star of the halo: a wobbling, drifting elliptical orbit
+    star(i, n, t) {
+      const th = t * 2.6 + (i / n) * G.DONDIZZY.TAU + Math.sin(t * 0.9) * 0.4;
+      const wob = 1 + 0.13 * Math.sin(t * 1.71 + i * 2.1);
+      return {
+        x: Math.cos(th) * 48 * wob,
+        y: Math.sin(th) * 15 * (1 + 0.30 * Math.sin(t * 2.33 + i * 0.7)),
+        th,
+      };
+    },
+  };
+
   class Game {
     constructor(canvas, input) {
       this.canvas = canvas;
@@ -1187,6 +1471,8 @@
       if (G.IS3D && G.R3.donFallClear) G.R3.donFallClear();
       this.gripe = null;       // the hat/rug complaint
       this.fwTimer = 0;
+      this._roastLines = null; // the taunts are dealt fresh every run
+      this._endCopy = null;
       this.loseT = 0;
       this.loseLimit = 10;   // the player's window to decide
       this.autoQuit = false;
@@ -1375,14 +1661,20 @@
       G.Audio.fanfare(big);
     }
     /* ---------- the ceremonious fall ----------
-       He does not just vanish: still on his feet, groggy, he RAMBLES — five
-       random bubbles from a pool of eighteen, each popping up somewhere new
-       around him — then one last incoherent THOUGHT drifts up in a cloud.
-       After that, the LAST FLIGHT takes him (see updateDonFlight). */
+       He does not just vanish: still on his feet, groggy, he RAMBLES — three
+       random bubbles from a pool, each popping up somewhere new around him.
+       After that the two exits part ways: the FIRST Don COLLAPSES to the
+       turf, shrinks to half size right there on the floor, and thinks his
+       last incoherent thought flat on his back — only then does the LAST
+       FLIGHT come for him (see updateDonFlight). The FINAL Don goes under
+       instead (see updateDonSwallow), and his thought drifts up out of the
+       hole once it already has him. */
     startDonFall(z) {
-      const pool = [...DON_RAMBLE];
+      // his OWN bank: the rug boss and the cap boss never share material —
+      // three bubbles shuffled out of it fresh every single defeat
+      const pool = [...(this.finalStage() ? DON_RAMBLE_2 : DON_RAMBLE_1)];
       const msgs = [];
-      for (let i = 0; i < 5 && pool.length; i++) msgs.push(pool.splice(randi(0, pool.length - 1), 1)[0]);
+      for (let i = 0; i < 3 && pool.length; i++) msgs.push(pool.splice(randi(0, pool.length - 1), 1)[0]);
       const spots = [...DONFALL_SPOTS];
       for (let i = spots.length - 1; i > 0; i--) {
         const j = randi(0, i); [spots[i], spots[j]] = [spots[j], spots[i]];
@@ -1393,6 +1685,9 @@
         // one is taken by the ground itself, and there is no flight at all.
         mode: this.finalStage() ? 'swallow' : 'heli',
         phase: 'speech', t: 0, mi: 0, msgT: DONFALL_MSG_T, msgs, spots,
+        // the first Don's collapse: how far he has folded, and the half-size
+        // shrink he lands at (the chopper lifts THIS man, already small)
+        colK: 0, pickK: 0, thudded: false,
         thought: DON_THOUGHTS[randi(0, DON_THOUGHTS.length - 1)],
         heliLine: HELI_LINES[randi(0, HELI_LINES.length - 1)],
         // the wreck lands BESIDE him — on whichever side the frame can hold,
@@ -1404,6 +1699,9 @@
         followK: 0, smokeK: 0, bob: 0,
         // the swallow's channels: the hole, his sink, and the things thrown
         sinkK: 0, ringK: 0, spew: false, spewT: SWALLOW_SPEW_T,
+        // ...and the hole's TEMPER: it starts FURIOUS, then alternates
+        // rage and simmer on a clock it rolls itself every run
+        furious: true, furyK: 1, furyT: rand(1.2, 2.4), burpT: 0,
         flames: [], rocks: [],
       };
       if (G.IS3D && G.R3.donFallInit) G.R3.donFallInit(this.donFall);
@@ -1416,15 +1714,41 @@
         D.msgT -= dt;
         if (D.msgT <= 0) {
           D.mi++;
-          if (D.mi >= D.msgs.length) { D.phase = 'thought'; D.t = 0; }
+          if (D.mi >= D.msgs.length) {
+            D.t = 0;
+            if (D.mode === 'swallow') {
+              // no thought in the dialog: the ground clears its throat right
+              // away — his last word comes later, FROM the hole
+              D.phase = 'fall';
+              G.Audio.crashBoom(); G.Audio.deathGroan();
+            } else {
+              // the words are spent: the knees go, and he folds
+              D.phase = 'collapse';
+              G.Audio.deathGroan();
+            }
+          }
           else D.msgT = DONFALL_MSG_T;
         }
+      } else if (D.phase === 'collapse') {
+        // THE FOLD: dieT is the same channel the corpse flop uses, so he
+        // goes over exactly like a dead boss — hesitation, then the whoosh
+        D.colK = clamp(D.t / COLLAPSE_T, 0, 1);
+        const pk = clamp(D.t / (COLLAPSE_T * 0.8), 0, 1);
+        D.pickK = pk * pk * (3 - 2 * pk);        // smoothstep down to PICK_S
+        this.camera.kick((0.25 + D.colK * 1.5) * dt * 30);
+        if (D.colK >= 0.93 && !D.thudded) {
+          D.thudded = true;                      // the lawn takes his weight
+          const B = G.Board;
+          this.dustBurst(B.colX(D.row, D.u), B.laneY[D.row], B.scale(D.row), 18, 1.6);
+          this.camera.kick(7);
+          G.Audio.bossThud(true);
+        }
+        if (D.t >= COLLAPSE_T + COLLAPSE_SETTLE_T) { D.phase = 'thought'; D.t = 0; }
       } else if (D.phase === 'thought') {
         if (D.t >= DONFALL_THOUGHT_T) {
           D.phase = 'fall'; D.t = 0;
-          // the ground clears its throat, or the rotors come down on him
-          if (D.mode === 'swallow') { G.Audio.crashBoom(); G.Audio.deathGroan(); }
-          else G.Audio.heliIn();
+          // the cloud clears — only NOW do the rotors come down on him
+          G.Audio.heliIn();
         }
       } else if (D.phase === 'fall') {
         if (D.mode === 'swallow') this.updateDonSwallow(D, dt);
@@ -1443,7 +1767,7 @@
       D.ringK = t < SWALLOW_OPEN_T ? t / SWALLOW_OPEN_T
         : t < SWALLOW_FIRE_T ? 1
         : clamp(1 - (t - SWALLOW_FIRE_T) / SWALLOW_CLOSE_T, 0, 1);
-      D.sinkK = clamp((t - 0.35) / SWALLOW_SINK_T, 0, 1);
+      D.sinkK = clamp((t - SWALLOW_SINK_AT) / SWALLOW_SINK_T, 0, 1);
       D.spew = t < SWALLOW_FIRE_T;
       if (t < SWALLOW_OPEN_T && !D.cracked) {
         D.cracked = true;
@@ -1452,41 +1776,61 @@
         this.camera.kick(9);
         G.Audio.bossThud(true);
       }
-      // a hard BURP twice a second, a steady trickle the rest of the time
-      const burp = ((t * 2) | 0) !== (((t - dt) * 2) | 0);
+      // THE TEMPER: the hole does not blow on a metronome. It works itself
+      // into a FURIOUS tantrum — tall columns, heavy rock, hard burps —
+      // then simmers down to a low grumble, then rages again, rolling the
+      // length of each mood fresh every time
+      D.furyT -= dt;
+      if (D.furyT <= 0) {
+        D.furious = !D.furious;
+        D.furyT = D.furious ? rand(1.1, 2.4) : rand(0.8, 1.9);
+      }
+      D.furyK += ((D.furious ? 1 : 0) - D.furyK) * Math.min(1, dt * 2.4);
+      // a hard BURP on its own clock — twice a second or better in a rage,
+      // barely once a second while it simmers
+      D.burpT -= dt;
+      const burp = D.burpT <= 0;
+      if (D.spew && burp) {
+        D.burpT = rand(0.3, 0.65) / (0.45 + 1.05 * D.furyK);
+        G.Audio.jumpWhoosh();
+        this.camera.kick(1.2 + 2.4 * D.furyK);
+      }
       if (D.spew) {
-        if (burp) { G.Audio.jumpWhoosh(); this.camera.kick(1.7); }
-        const n = burp ? 12 : 3;
+        const n = Math.round((burp ? 6 : 1.2) + (burp ? 13 : 4) * D.furyK);
         const mouth = 66 * s;                     // the flames come out of the WIDTH of it
         for (let i = 0; i < n; i++) {
           D.flames.push({
             bouncy: false,
-            x: x + rand(-mouth * 0.8, mouth * 0.8), y: gy + rand(-4, 8) * s,
-            vx: rand(-40, 40) * s,
-            vy: -rand(120, 430) * s * (burp ? 1.25 : 0.8),
-            r: rand(5, 14) * s * (burp ? 1.3 : 1),
-            t: 0, life: rand(0.6, 1.2), g: rand(120, 260) * s,
+            x: x + rand(-mouth * 0.8, mouth * 0.8) * (0.65 + 0.35 * D.furyK),
+            y: gy + rand(-4, 8) * s,
+            vx: rand(-40, 40) * s * (1 + 0.7 * D.furyK),
+            // every tongue its own height, and the temper sets the ceiling:
+            // a furious hole throws a column twice as tall as a simmer
+            vy: -rand(100, 240 + 400 * D.furyK) * s * (burp ? 1.15 : 0.85),
+            r: rand(5, 14) * s * (0.8 + 0.45 * D.furyK) * (burp ? 1.3 : 1),
+            t: 0, life: rand(0.6, 1.2) * (0.85 + 0.3 * D.furyK), g: rand(120, 260) * s,
           });
         }
       }
-      // and every so often something SOLID comes out with the fire
+      // and on the temper's clock something SOLID comes out with the fire
       D.spewT -= dt;
       if (D.spew && D.spewT <= 0) {
-        D.spewT = rand(0.4, 1.1);
+        D.spewT = D.furyK > 0.5 ? rand(0.16, 0.45) : rand(0.6, 1.35);
         const lava = Math.random() < 0.5;
-        const many = !lava && Math.random() < 0.4 ? 2 : 1;
+        const many = lava ? 1 : 1 + Math.floor(Math.random() * (1 + 2.4 * D.furyK));
         for (let i = 0; i < many; i++) {
           const dir = Math.random() < 0.5 ? -1 : 1;
           D.rocks.push({
             kind: lava ? 'lava' : 'rock', bouncy: true, bounced: 0,
             x: x + rand(-12, 12) * s, y: gy - rand(2, 24) * s,
-            vx: dir * rand(60, 250) * s, vy: -rand(280, 600) * s,
-            r: rand(4.5, 9.5) * s, t: 0,
+            vx: dir * rand(60, 250) * s * (0.8 + 0.55 * D.furyK),
+            vy: -rand(280, 600) * s * (0.75 + 0.5 * D.furyK),
+            r: rand(4.5, 9.5) * s * (0.85 + 0.35 * D.furyK), t: 0,
             life: lava ? rand(1.7, 2.7) : rand(2.0, 3.2),
-            g: 900 * s, spin: rand(-4, 4) * (dir > 0 ? 1 : 1),
+            g: 900 * s, spin: rand(-4, 4),
           });
         }
-        if (Math.random() < 0.4) this.camera.kick(1.5);
+        if (Math.random() < 0.25 + 0.45 * D.furyK) this.camera.kick(1.5);
       }
       // integrate: the lawn catches whatever comes back down
       const step = p => {
@@ -1611,6 +1955,8 @@
           this.celebration.seeya = {
             term: DON_COOKED[randi(0, DON_COOKED.length - 1)],
             sub: SEEYA_SUBS[randi(0, SEEYA_SUBS.length - 1)],
+            kicker: SEEYA_KICKERS[randi(0, SEEYA_KICKERS.length - 1)],
+            bye: SEEYA_BYES[randi(0, SEEYA_BYES.length - 1)],
           };
         } else this.celebration.phase = 'end';
       }
@@ -1675,20 +2021,26 @@
       this.celebration.phase = 'roast';
       this.celebration.roastT = 0;
       this.fwTimer = 0.2;
+      // THE CROWD: a loud, ragged cheer — a swelling shush, a chant with
+      // "hey!" stabs, hand claps scattered off the beat, whistles — starting
+      // NOW, lifting again under the confetti, and hanging on past its end
+      G.Audio.crowdCheer('pro');
       G.Audio.fanfare(true);
     }
     launchShell(night, big) {
       const palette = night
         ? ['#ffd23f', '#ff5ea8', '#6ef0ff', '#b9ff2e', '#ffffff', '#ff9c40', '#c58bff']
         : ['#ffd23f', '#ff6b6b', '#8ee05c', '#ffe9a0', '#ffffff'];
-      this.shells.push(new Shell(rand(150, 1130), rand(night ? 70 : 130, night ? 250 : 260),
+      // the night show breaks ACROSS THE WHOLE SKY — down to mid-screen, not
+      // bunched at the top — so the bursts own the frame, not just its crown
+      this.shells.push(new Shell(rand(110, 1170), rand(night ? 80 : 130, night ? 430 : 260),
         pick(palette), night, big, big ? pick(palette) : null));
     }
-    /* one huge two-colour crown, high and central — the exclamation mark
-       of the send-off */
+    /* one huge two-colour crown — high-ish, but it can land anywhere across
+       the middle band of the sky now, not just pinned over the centre */
     megaShell() {
       const palette = ['#ffd23f', '#ff5ea8', '#6ef0ff', '#b9ff2e', '#ffffff'];
-      this.shells.push(new Shell(rand(480, 800), rand(64, 130), pick(palette), true, true, pick(palette)));
+      this.shells.push(new Shell(rand(380, 900), rand(80, 260), pick(palette), true, true, pick(palette)));
     }
     /* the GRAND FINALE's director: a shell with every knob set — launch x,
        break height, colour, sideways angle, burst look */
@@ -1713,14 +2065,16 @@
       const sp = big ? 450 : sh.night ? 360 : 250;
       const k = big ? 1.4 : 1;
       if (style === 'peony') {
-        // the classic: a sphere of tracers, two-tone when it is a big one
-        const n = Math.floor((big ? 150 : sh.night ? 78 : 42) * k);
-        const lifeK = big ? 1.5 : 1;
+        // the classic: a sphere of tracers, two-tone when it is a big one.
+        // The saturation pass wants CHAOS: wider speed spread, looser angles,
+        // more of them, so no two bursts ever read the same.
+        const n = Math.floor((big ? 170 : sh.night ? 88 : 42) * k);
+        const lifeK = big ? 1.6 : 1;
         for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2 + rand(-0.07, 0.07);
-          const v = rand(sp * 0.32, sp);
+          const a = (i / n) * Math.PI * 2 + rand(-0.13, 0.13);
+          const v = rand(sp * 0.20, sp);
           this.fx.push(new Ember(sh.x + Math.cos(a) * 3, sh.y + Math.sin(a) * 3,
-            Math.cos(a) * v, Math.sin(a) * v, sh.color, rand(0.55, 1.35) * lifeK, rand(2, 3.8), sh.night ? 90 : 130));
+            Math.cos(a) * v, Math.sin(a) * v, sh.color, rand(0.55, 1.35) * lifeK, rand(2.2, 4.2), sh.night ? 90 : 130));
         }
         if (sh.col2) {
           const n2 = Math.floor(n * 0.5);
@@ -1776,13 +2130,20 @@
           }
         }
       }
-      // core flash — a bright, brief bloom so the break reads even on a still
-      for (let i = 0; i < (big ? 26 : sh.night ? 16 : 9); i++) {
-        this.fx.push(new Ember(sh.x, sh.y, rand(-50, 50) * (big ? 1.6 : 1), rand(-50, 50) * (big ? 1.6 : 1),
-          '#fff8d0', rand(0.16, 0.32), big ? rand(8, 16) : rand(6, 13), 0));
+      // core flash — a BRIGHT bloom so the break reads even on a still
+      for (let i = 0; i < (big ? 40 : sh.night ? 24 : 9); i++) {
+        this.fx.push(new Ember(sh.x, sh.y, rand(-50, 50) * (big ? 1.9 : 1), rand(-50, 50) * (big ? 1.9 : 1),
+          '#fff8d0', rand(0.16, 0.34), big ? rand(10, 20) : rand(7, 15), 0));
+      }
+      // plus one fat colour bloom of its own — the break itself should GLOW
+      if (sh.night || big) {
+        for (let i = 0; i < 10; i++) {
+          this.fx.push(new Ember(sh.x + rand(-14, 14), sh.y + rand(-14, 14),
+            rand(-30, 30), rand(-30, 30), sh.col2 || sh.color, rand(0.22, 0.4), rand(9, 17), 0));
+        }
       }
       const cel2 = this.celebration;
-      const cap = cel2 && cel2.phase === 'fwfinal' ? 3400 : cel2 && cel2.phase === 'fwshow' ? 2600 : 1400;
+      const cap = cel2 && cel2.phase === 'fwfinal' ? 4600 : cel2 && cel2.phase === 'fwshow' ? 3000 : 1400;
       if (this.fx.length > cap) this.fx.splice(0, this.fx.length - cap);
       // during the saturated send-off the bursts outrun the ear — throttle
       // the booms so the mix stays a boom, not a buzz
@@ -2562,26 +2923,33 @@
           } else if (ph2 === 'confetti') {
             this.updateConfetti(rawDt);      // the calm after — ten s of paper rain
           } else if (ph2 === 'seeya') {
-            // the good-riddance card: ten full seconds, then the chase
+            // the good-riddance card: five seconds to read, then the chase
             this.celebration.seeyaT += rawDt;
             if (this.celebration.seeyaT >= SEEYA_T) { this.startParade(); this.celebration.phase = 'parade'; }
           } else {
-            this.fwTimer -= rawDt;
-            if (this.fwTimer <= 0) {
-              this.launchShell(this.celebration.night);
-              // the finale (stage 5) doubles the rate: a dense, constant bloom
-              this.fwTimer = this.celebration.night ? rand(0.14, 0.42) : rand(0.3, 0.72);
+            // THE END screen: on the finale the sky gets FIVE more seconds of
+            // fireworks once the message is up — then it goes quiet for good.
+            // Ordinary stage clears keep their celebratory sky the whole time.
+            const cel = this.celebration;
+            cel.endT = (cel.endT || 0) + rawDt;
+            if (!cel.finale || cel.endT <= 5) {
+              this.fwTimer -= rawDt;
+              if (this.fwTimer <= 0) {
+                this.launchShell(cel.night);
+                // the finale (stage 5) doubles the rate: a dense, constant bloom
+                this.fwTimer = cel.night ? rand(0.14, 0.42) : rand(0.3, 0.72);
+              }
             }
           }
           if (ph2 === 'roast') {
-            this.celebration.roastT += rawDt * 28;   // slow, savorable scroll
+            this.celebration.roastT += rawDt * 39.2;   // 40% faster — the report almost struts now
             // the send-off trigger: the whole report has been read and its
             // bottom edge is halfway up the screen, on its way out — the
             // sky answers with everything it has
             if (this.roastBottomY() <= 360) this.startFwShow();
             else if (this.celebration.roastT > this.roastSpan()) this.celebration.phase = 'end';
           } else if (ph2 === 'fwshow' || ph2 === 'fwfinal') {
-            this.celebration.roastT += rawDt * 28;   // the report rolls on through the show
+            this.celebration.roastT += rawDt * 39.2;   // the report rolls on through the show
           }
         }
         this.updateEntities(dt);
@@ -3241,7 +3609,7 @@
        Stage 5 — the final boss: the PARADE crosses first (horde herded out
        with the pult chasing, then the chase reversed), and once the screen
        is empty the night sky falls, the fireworks double, and the finale
-       copy is spelled out: CONGRATULATIONS — THE DON IS GONE FOR GOOD —
+       copy is spelled out: CONGRATULATIONS — a dealt-fresh send-off line —
        THE END. */
     drawStageClear(ctx) {
       const cel = this.celebration;
@@ -3287,8 +3655,9 @@
         ctx.fillRect(0, 0, 1280, 720);
         ctx.restore();
 
+        const EC = this.endCopy();
         G.outlinedText(ctx, 'CONGRATULATIONS', 640, 116, 50, '#ffd23f', 'center', '#04060f', 8);
-        G.outlinedText(ctx, 'THE DON IS GONE FOR GOOD. CAP OFF. RUG OFF. GONE.', 640, 160, 21, '#b9ff2e', 'center', '#04060f', 6);
+        G.outlinedText(ctx, EC.head, 640, 160, 21, '#b9ff2e', 'center', '#04060f', 6);
         const te = 0.82 + Math.sin(performance.now() / 320) * 0.18;   // THE END breathes
         ctx.save(); ctx.globalAlpha = te;
         G.outlinedText(ctx, 'THE  END', 640, 272, 96, '#ffffff', 'center', '#1a2a10', 14);
@@ -3300,7 +3669,8 @@
         G.outlinedText(ctx, G.SHORT
           ? 'Two stages. Two Dons. Zero brains lost.'
           : 'Five stages. Nine kinds of undead. Two Dons. Your brain: still yours.', 640, 492, 22, '#ff9e3d');
-        G.outlinedText(ctx, 'Thanks for playing MELON MAYHEM.', 640, 528, 24, '#f4f2e6');
+        G.outlinedText(ctx, EC.quip, 640, 526, 20, '#b9ff2e', 'center', '#04060f', 5);
+        G.outlinedText(ctx, EC.thanks, 640, 558, 24, '#f4f2e6');
         const pulse = 0.7 + Math.sin(performance.now() / 250) * 0.3;
         ctx.save(); ctx.globalAlpha = pulse;
         G.outlinedText(ctx, 'ENTER — BACK TO THE MENU  ·  R — REPLAY THE FINALE', 640, 664, 24, '#ffd23f');
@@ -3347,11 +3717,15 @@
     }
     /* The good-riddance card. The hole has shut over the Don, and the lawn
        takes ten unhurried seconds to say what everybody is thinking: the
-       cooking term is rolled fresh every run, the sub-line sneers, and only
-       then does the chase start. Embers keep drifting up off the sealed
-       seam, because the lawn is not done being smug about it. */
+       cooking term, the kicker, the sneer and the big goodbye are all rolled
+       fresh off the banks every run — and only then does the chase start.
+       Embers keep drifting up off the sealed seam, because the lawn is not
+       done being smug about it. */
     drawSeeya(ctx) {
-      const s = this.celebration.seeya || { term: 'COOKED', sub: SEEYA_SUBS[0] };
+      const s = this.celebration.seeya || {
+        term: 'COOKED', sub: SEEYA_SUBS[0],
+        kicker: SEEYA_KICKERS[0], bye: SEEYA_BYES[0],
+      };
       const now = performance.now() / 1000;
       this.drawNightSky(ctx);
       ctx.save();
@@ -3372,13 +3746,14 @@
         ctx.beginPath(); ctx.arc(ex, ey, 1.6 + (sd % 2), 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
-      G.outlinedText(ctx, '— AN OFFICIAL LAWN ANNOUNCEMENT —', 640, 196, 18, '#8a9384');
+      G.outlinedText(ctx, s.kicker, 640, 196, 18, '#8a9384');
       const flick = 0.88 + Math.sin(now * 21) * 0.06 + Math.sin(now * 7.3) * 0.06;
       ctx.save(); ctx.globalAlpha = flick;
       G.outlinedText(ctx, `THE DON IS ${s.term}.`, 640, 278, 58, '#ff8040', 'center', '#1a0a05', 14);
       ctx.restore();
       G.outlinedText(ctx, s.sub, 640, 348, 24, '#cfe8c2');
-      G.outlinedText(ctx, 'GOOD RIDDANCE — SEE YA, DON!', 640, 432, 46, '#ffd23f', 'center', '#241004', 11);
+      // the big goodbye: shrinks to stay inside the card on the longer ones
+      G.outlinedText(ctx, s.bye, 640, 432, s.bye.length > 32 ? 36 : 46, '#ffd23f', 'center', '#241004', 11);
       const pulse = 0.55 + Math.sin(performance.now() / 240) * 0.25;
       ctx.save(); ctx.globalAlpha = pulse;
       G.outlinedText(ctx, 'ENTER — LET THE CHASE BEGIN', 640, 694, 15, '#cfe8c2');
@@ -3457,31 +3832,27 @@
     }
     /* ================= THE ROAST =================
        After the chase: the neighborhood report scrolls up the burning sky —
-       epic, funny, and utterly without mercy. MAGA jokes included, free of
-       charge. When the last line rolls off, the congrats end screen lands. */
+       epic, funny, and utterly without mercy. The copy is DEALT FRESH from
+       the taunt banks every run: a status, five sections, a verdict lead-in,
+       two aftermath lines — with exactly two constants, the YOU ARE FIRED.
+       verdict and the pult’s sign-off at the very end. */
     roastLines() {
-      return [
-        ['THE NEIGHBORHOOD REPORT', 40, '#ffd23f'],
-        ['— special evening edition —', 18, '#cfe8c2'],
-        ['·', 14, '#5a6a52'],
-        ['The undead horde: HERDED. The Don: DONE.', 26, '#f4f2e6'],
-        ['He promised a wall around the garden.', 24, '#cfe8c2'],
-        ['We built him a compost heap instead.', 24, '#cfe8c2'],
-        ['His cap was confiscated at the lawn line.', 24, '#ffe9a0'],
-        ['His rug? Blown clean off. Fake hair. Real losses.', 24, '#ffe9a0'],
-        ['No collusion — just collision,', 24, '#b9ff2e'],
-        ['with melons, at terminal velocity.', 24, '#b9ff2e'],
-        ['He tried to grab the harvest by the stem.', 24, '#f4f2e6'],
-        ['The harvest grabbed back. At 45 degrees. Twice.', 24, '#f4f2e6'],
-        ['Impeached by artillery. Convicted by squash.', 26, '#ff9e3d'],
-        ['Two tours of this garden. Two total wipeouts. SAD!', 26, '#ff9e3d'],
-        ['The Melon-Pult has spoken:', 24, '#cfe8c2'],
-        ['YOU ARE FIRED.', 76, '#ff5555'],   // the verdict: huge, calligraphic, shaking
-        ['·', 14, '#5a6a52'],
-        ['The graveyard is empty. The tomatoes stand tall.', 24, '#cfe8c2'],
-        ['The melons rest easy. The brains remain uneaten.', 24, '#cfe8c2'],
-        ['…and the pult? Already reloading.', 24, '#ffd23f'],
-      ];
+      if (!this._roastLines) this._roastLines = buildRoastLines();
+      return this._roastLines;
+    }
+    /* The end screen’s copy — the frame is fixed (CONGRATULATIONS … THE
+       END) but the headline, the quip and the sign-off are dealt fresh off
+       the banks once per run and cached here, so the screen never flickers
+       between variants mid-read. */
+    endCopy() {
+      if (!this._endCopy) {
+        this._endCopy = {
+          head: pick(END_HEADS),
+          quip: pick(END_QUIPS),
+          thanks: pick(END_THANKS),
+        };
+      }
+      return this._endCopy;
     }
     /* The verdict line needs a taller slot than the report's 54px column
        pitch — 76px of calligraphy would crowd its neighbours to death. */
@@ -3512,9 +3883,9 @@
       const peak = p >= 0.24 && p < 0.7;
       cel.volleyT -= rawDt;
       if (cel.volleyT <= 0 && p < 0.88) {
-        // build → SATURATE → calm: volleys of 2, then 4 at once, then singles
-        cel.volleyT = (peak ? 0.16 : 0.52) * rand(0.8, 1.25);
-        const n = peak ? 4 : 2;
+        // build → SATURATE → calm: volleys of 2, then 5 at once, then singles
+        cel.volleyT = (peak ? 0.15 : 0.52) * rand(0.8, 1.25);
+        const n = peak ? 5 : 2;
         for (let i = 0; i < n; i++) this.launchShell(true, true);
       }
       if (peak && cel.fwT >= cel.megaT) {
@@ -3524,16 +3895,21 @@
       }
       if (cel.fwT >= SHOW_T) this.startFwFinal();
     }
-    /* ---- the GRAND FINALE: ten more seconds, in two exact halves.
+    /* ---- the GRAND FINALE: fifteen seconds, in two halves.
        First five: an ORGANIZED sequence — every shell placed on a score
        (waves marching across the sky, mirrored crossfire angling in from
        the edges, a peacock fan, a row of perfect rings, one salvo of every
        burst look at once), each beat with its own coloured light.
-       Last five: the intensity and density ramp without mercy — the volley
-       interval collapses from 0.42 s to 0.07 s, the volleys grow from two
-       shells to ten, every burst look mixes in at every size, named mega
-       crowns land faster and faster — until THE CLOSER fires everything at
-       once under a full white-out and the whole skyline saturates. */
+       Then TEN seconds of saturation: the first five ramp the intensity and
+       density up without mercy — the volley interval collapses from 0.42 s
+       to 0.07 s, the volleys grow from two shells to ten, every burst look
+       mixes in at every size, named mega crowns land faster and faster —
+       and the last five hold EXTREME: volleys of up to fourteen shells
+       every ~0.05 s, nearly all of them big, angled hard, breaking all over
+       the sky, with an organized ENCORE scored underneath the chaos — tight
+       steep crossfire, a double ring row, an oversized all-looks salvo and
+       an inverted peacock — until THE CLOSER fires everything at once under
+       a full white-out and the whole skyline saturates. */
     startFwFinal() {
       const cel = this.celebration;
       cel.phase = 'fwfinal';
@@ -3547,17 +3923,18 @@
     buildFwPattern() {
       const C = { gold: '#ffd23f', ice: '#6ef0ff', pink: '#ff5ea8', lime: '#b9ff2e', violet: '#c58bff', white: '#ffffff', orange: '#ff9c40' };
       const Q = (t, fn) => this.fwQueue.push({ t, fn });
-      // 1 · the GOLD WAVE — six peonies marching left → right
+      // 1 · the GOLD WAVE — six peonies marching left → right, scattered
+      //     through the middle band so even the organized half fills the sky
       for (let i = 0; i < 6; i++) {
         Q(0.15 + i * 0.11, () => {
-          this.shellAt({ x: 170 + i * 188, y: rand(120, 170), color: C.gold });
+          this.shellAt({ x: 170 + i * 188, y: rand(110, 300), color: C.gold });
           this.camera.hitFlash(0.09, '#ffe9a0'); this.camera.kick(4);
         });
       }
       // 2 · the ICE WAVE marches back — perfect rings this time
       for (let i = 0; i < 6; i++) {
         Q(0.95 + i * 0.11, () => {
-          this.shellAt({ x: 1110 - i * 188, y: rand(110, 160), color: C.ice, style: 'ring' });
+          this.shellAt({ x: 1110 - i * 188, y: rand(110, 300), color: C.ice, style: 'ring' });
           this.camera.hitFlash(0.09, '#cfe8ff'); this.camera.kick(4);
         });
       }
@@ -3593,54 +3970,96 @@
         });
         this.camera.hitFlash(0.16, '#ffe9b0');
       });
+      /* ---- the EXTREME ENCORE — the extra five seconds of saturation keep
+         a spine of organized beats under the chaos: different angles, sizes
+         and patterns, all oversized. ---- */
+      // 7 · tight LOW crossfire, twice the angle, big two-tones
+      for (let i = 0; i < 3; i++) {
+        const y = 90 + i * 70;
+        Q(10.55 + i * 0.24, () => {
+          this.shellAt({ x: 60, y, color: i % 2 ? C.ice : C.gold, col2: C.pink, big: true, vx: 260 });
+          this.shellAt({ x: 1220, y, color: i % 2 ? C.violet : C.lime, col2: C.white, big: true, vx: -260 });
+          this.camera.kick(6);
+        });
+      }
+      // 8 · the DOUBLE RING ROW — five rings on two heights, one gold crown
+      Q(11.35, () => {
+        for (const [xx, yy] of [[210, 150], [425, 220], [640, 150], [855, 220], [1070, 150]])
+          this.shellAt({ x: xx, y: yy, color: C.ice, style: 'ring' });
+      });
+      Q(11.55, () => this.shellAt({ x: 640, y: 80, color: C.gold, big: true, col2: C.violet }));
+      // 9 · the BIG SALVO — every look at once, oversized, mirrored
+      Q(12.15, () => {
+        const looks = ['peony', 'ring', 'willow', 'palm', 'crossette'];
+        const cols = [C.pink, C.gold, C.ice, C.lime, C.violet];
+        looks.forEach((st, i) => {
+          this.shellAt({ x: 190 + i * 225, y: rand(80, 140), color: cols[i], style: st, big: true });
+          this.shellAt({ x: 1090 - i * 225, y: rand(80, 140), color: cols[4 - i], style: st, big: true });
+        });
+        this.camera.hitFlash(0.2, '#ffe9b0');
+      });
+      // 10 · the INVERTED PEACOCK — five angled bigs fanning IN from the edges
+      const encoreCols = [C.violet, C.pink, C.white, C.orange, C.gold];
+      for (let i = 0; i < 5; i++) {
+        const k = i - 2;
+        Q(12.9 + Math.abs(k) * 0.05, () =>
+          this.shellAt({ x: 640 + k * 150, y: 260, color: encoreCols[i], vx: -k * 110, style: i % 2 ? 'palm' : 'peony', big: true }));
+      }
     }
     updateFwFinal(rawDt) {
       const cel = this.celebration;
-      const FIN_T = 10.0;
+      const FIN_T = 15.0;                    // 5 s pattern + 10 s saturation
       cel.fwT += rawDt;
-      // whatever scored beat has come due, fire it — crossette comets keep
-      // queueing their splits through the saturation half, so no time gate
+      // whatever scored beat has come due, fire it — the ENCORE beats and the
+      // crossette splits ride this queue through the whole saturation
       if (this.fwQueue) {
         this.fwQueue = this.fwQueue.filter(ev => { if (ev.t <= cel.fwT) { ev.fn(); return false; } return true; });
       }
-      // the saturation half: everything ramps together toward the extreme
+      // q ramps to max over the first five seconds of saturation;
+      // x = the EXTRA five — everything holds EXTREME and keeps climbing
       const q = clamp((cel.fwT - 5) / 5, 0, 1);
+      const x = clamp((cel.fwT - 10) / 5, 0, 1);
       if (q > 0) {
         cel.volleyT -= rawDt;
         if (cel.volleyT <= 0) {
-          cel.volleyT = (0.42 - 0.35 * q) * rand(0.85, 1.15);   // 0.42 s → 0.07 s
-          const n = 2 + Math.floor(q * q * 6 + q * 2);          // 2 → 10 shells
+          // 0.42 s → 0.07 s across the ramp, then squeezed to ~0.04 s extreme
+          cel.volleyT = Math.max(0.04, 0.42 - 0.35 * q - 0.028 * x) * rand(0.85, 1.15);
+          const n = 3 + Math.floor(q * q * 7 + q * 3 + x * 5);   // 3 → 13 → 18 shells
           const looks = ['peony', 'peony', 'ring', 'willow', 'palm', 'crossette'];
           for (let i = 0; i < n; i++) {
             this.shellAt({
-              x: rand(120, 1160), y: rand(60, 250),
+              // breaks ALL OVER the sky — the lower band is what makes the
+              // frame feel taken over rather than crowned
+              x: rand(110, 1170), y: rand(60, 450),
               color: pick(FW_PALETTE), style: pick(looks),
-              big: Math.random() < 0.25 + q * 0.5,
-              vx: rand(-1, 1) * 60 * q,
+              big: Math.random() < 0.25 + q * 0.5 + x * 0.2,   // → 95% big
+              vx: rand(-1, 1) * (60 * q + 70 * x),             // angled harder extreme
             });
           }
-          this.camera.kick(2 + 6 * q);
+          if (x > 0.4 && Math.random() < 0.1) this.camera.hitFlash(0.1, '#fff2c0');
+          this.camera.kick(2 + 6 * q + 4 * x);
         }
-        // named mega crowns land faster and faster on the way up
-        if (q < 0.93 && cel.fwT >= cel.megaT) {
+        // named mega crowns land on an accelerating chain right up to the closer
+        const satK = (cel.fwT - 5) / (FIN_T - 5);
+        if (satK < 0.9 && cel.fwT >= cel.megaT) {
           cel.megaT = cel.fwT + (FIN_T - cel.fwT) * 0.38;
           this.megaShell();
           this.camera.hitFlash(0.18, '#fff2c0');
           this.camera.kick(9);
         }
         // THE CLOSER: everything at once, one last white-out, then the rain
-        if (q >= 0.93 && !cel.closerDone) {
+        if (satK >= 0.9 && !cel.closerDone) {
           cel.closerDone = true;
-          for (let i = 0; i < 12; i++) {
-            this.shellAt({ x: rand(160, 1120), y: rand(60, 200), color: pick(FW_PALETTE), big: true, style: pick(['peony', 'willow', 'ring']) });
+          for (let i = 0; i < 20; i++) {
+            this.shellAt({ x: rand(120, 1160), y: rand(70, 420), color: pick(FW_PALETTE), big: true, style: pick(['peony', 'willow', 'ring', 'palm']) });
           }
-          this.megaShell(); this.megaShell();
-          this.camera.hitFlash(0.42, '#ffffff');
-          this.camera.kick(22);
+          this.megaShell(); this.megaShell(); this.megaShell();
+          this.camera.hitFlash(0.46, '#ffffff');
+          this.camera.kick(24);
           G.Audio.crashBoom();
         }
       }
-      if (cel.fwT >= FIN_T) { cel.phase = 'confetti'; cel.confettiT = 0; this.fwQueue.length = 0; }
+      if (cel.fwT >= FIN_T) { cel.phase = 'confetti'; cel.confettiT = 0; cel.cheeredUp = false; this.fwQueue.length = 0; }
     }
     /* the paper rain — about ten full seconds of confetti before the end */
     updateConfetti(rawDt) {
@@ -3649,9 +4068,12 @@
       if (cel.confettiT < 8.4) {
         for (let i = 0; i < 3; i++) this.confetti.push(new Confetto());
       }
+      // the crowd lifts the rain one more time — and when the paper stops,
+      // the cheer hangs on a few seconds past the last of it
+      if (!cel.cheeredUp && cel.confettiT >= 3.9) { cel.cheeredUp = true; G.Audio.crowdCheer('up'); }
       this.fwTimer -= rawDt;
       if (this.fwTimer <= 0) { this.launchShell(true); this.fwTimer = rand(1.1, 2.0); }
-      if (cel.confettiT >= 10) cel.phase = 'end';
+      if (cel.confettiT >= 10) { G.Audio.crowdCheer('out'); cel.phase = 'end'; }
     }
     drawRoast(ctx) {
       const cel = this.celebration;
@@ -3693,7 +4115,7 @@
       ctx.restore();
     }
     /* The Don's exit. One ceremony, BOTH render paths: still on his feet and
-       groggy he RAMBLES — five bubbles, each one popping up somewhere new
+       groggy he RAMBLES — three bubbles, each one popping up somewhere new
        around him — then thinks one last incoherent thought in a cloud. Then
        THE LAST FLIGHT: the chopper hooks him, hauls him out of the frame,
        flies him out to the horizon, brings him back and DROPS him, and then
@@ -3712,6 +4134,12 @@
       if (is3d) {
         const a = (P && P.airborne) ? G.R3.donFallAirAnchor(D) : G.R3.donFallAnchor(D.u, D.row);
         ax = a.x; ay = a.y; txA = a.x; tyA = a.y;
+        // FLAT ON HIS BACK (the first Don's collapse): the cloud trails to
+        // the head he is lying on — a touch toward it, off the feet anchor
+        if (D.mode !== 'swallow' && (D.colK || 0) > 0.85 && !(P && P.airborne)) {
+          const a2 = G.R3.donFallAnchor(D.u + 0.9, D.row);
+          txA = a2.x; tyA = a.y - 12 * ss;
+        }
       } else {
         this.drawDonFallBody2D(ctx, D, x, gy, time, P);
       }
@@ -3732,15 +4160,33 @@
           `\u25CF ${D.mi + 1} / ${D.msgs.length}`, txA, tyA);
       } else if (D.phase === 'thought') {
         const spot = D.spots[D.spots.length - 1];
+        // he thinks it FLAT ON HIS BACK at half size: the trail walks down to
+        // the head he is lying on, not to where his gut used to be
+        if (!is3d && (D.colK || 0) > 0) {
+          const figS = P ? P.apD : 1;
+          const tt = clamp(0.9 * D.colK / 0.85, 0, 1), e = tt * tt, th = 1.35 * e;
+          txA = x + ss * figS * (16 * e - 4 * Math.cos(th) + 192 * Math.sin(th));
+          tyA = gy + ss * figS * (30 * e - 4 * Math.sin(th) - 192 * Math.cos(th));
+        }
         this.drawThought(ctx, D.thought, ax + spot[0], ay + spot[1], D.t, txA, tyA);
       } else if (D.phase === 'fall') {
-        // on the rope: the one-liner, pinned to him wherever he is
-        if (D.hookK > 0.85 && D.dropK < 0.15) {
+        if (D.mode === 'swallow') {
+          // HIS LAST THOUGHT COMES LATE — out of the hole itself, only once
+          // he is all the way under and the ground is spitting chunks. The
+          // cloud hangs over the mouth and its trail walks down INTO it.
+          const tw = D.t - SWALLOW_THOUGHT_AT;
+          if (tw >= 0 && tw < SWALLOW_HOLE_THOUGHT_T) {
+            const spot = D.spots[D.spots.length - 1];
+            this.drawThought(ctx, D.thought, x + spot[0], gy + spot[1] - 40, tw, x, gy - 26 * ss);
+          }
+          // THE PICKUP LINE — he shouts it on the rope, and only for its
+          // three-second beat (see HELI_LINE_*): gone well before the drop
+        } else if (D.hookK > HELI_LINE_HOOKK && D.carryK < HELI_LINE_CARRYK) {
           let bx2 = ax, by2 = ay - 66;
           if (!is3d && P) {                    // 2D: his body rides the path too
             const s2 = B.scale(D.row);
             txA = x + P.don.col * B.colW * s2;
-            tyA = gy - (P.don.y - 122) * s2;
+            tyA = gy - (P.don.y - 122 * P.apD) * s2;   // his gut, at his scale
             bx2 = txA; by2 = tyA - 66;
           }
           this.drawBubble(ctx, D.heliLine, bx2, by2, '#ffd23f', null, txA, tyA);
@@ -3794,6 +4240,9 @@
         const k = fk(z);
         return { k, gy: gy - FAR_LIFT * k, ds: 1 - (1 - FAR_DS) * k };
       };
+      // THE DIZZY STATE — 1 through the whole ramble, easing out as the exit
+      // claims him (the chopper's approach, or the ground's first yawn)
+      const dizK = G.DONDIZZY ? G.DONDIZZY.amount(D) : 0;
 
       /* ---- THE SWALLOW (final boss): the ground takes him, no chopper ----
          He sinks his own height (so he really does go out of sight), and the
@@ -3807,8 +4256,42 @@
           // the 3D gets this free, the plane of the lawn is opaque there
           ctx.save();
           ctx.beginPath(); ctx.rect(0, 0, 1280, gy + 2 * s); ctx.clip();
-          drawDon(x, gy + sinkK * 292 * s, 0, s,
-            { pose: 'die', dieT: 0.9 * clamp((sinkK - 0.35) / 0.55, 0, 1) });
+          const fy = gy + sinkK * 292 * s;
+          // DIZZY: he sways on his feet right up until the lawn has him
+          if (dizK > 0.02) {
+            ctx.translate(x, fy);
+            ctx.rotate(G.DONDIZZY.sway(time) * 0.075 * dizK);
+            ctx.translate(-x, -fy);
+          }
+          drawDon(x, fy, 0, s,
+            { pose: 'die', dieT: 0.9 * clamp((sinkK - 0.35) / 0.55, 0, 1), dizzy: dizK });
+          // the wobbly crown of stars rides the same sway
+          if (dizK > 0.02) this.drawDizzyHalo(ctx, x - 4 * s, fy - 192 * s, s, time, dizK);
+          ctx.restore();
+        }
+        return;
+      }
+
+      /* ---- THE COLLAPSE (the first Don): the words run out and he FOLDS —
+         tipped flat onto the turf and shrunk to half size right there on the
+         floor. He lies here through his last thought and the whole approach,
+         and it is this same half-size man the rope eventually lifts. */
+      if (D.mode !== 'swallow' && (D.colK || 0) > 0 && !D.donDown && !(P && P.airborne)) {
+        const colK = D.colK, figS = P ? P.apD : 1;
+        const tt = clamp(0.9 * colK / 0.85, 0, 1), e = tt * tt;
+        // a lying man's shadow is a WIDE one
+        shadowAt(x, 1 + 0.4 * e, 0.3, gy, s * figS);
+        drawDon(x, gy, 0, s * figS,
+          { pose: 'die', dieT: 0.9 * colK, dizzy: dizK });
+        // the halo rides the head he is lying on: replay the painter's own
+        // die transform so the stars land where his skull actually is
+        if (dizK > 0.02 && e < 0.995) {
+          ctx.save();
+          ctx.translate(x, gy);
+          if (s * figS !== 1) ctx.scale(s * figS, s * figS);
+          ctx.translate(16 * e, 30 * e);
+          ctx.rotate(1.35 * e);
+          this.drawDizzyHalo(ctx, -4, -192, 1, time, dizK);
           ctx.restore();
         }
         return;
@@ -3834,26 +4317,40 @@
       const pastHorizon = !P || Math.abs(P.don.z) > 140;
       const farD = P ? at(P.don.z) : { k: 0, gy, ds: 1 };
       const farH = P ? at(P.heli.z) : { k: 0, gy, ds: 1 };
+      // the FIGURE scale is the flight plan's own apD — the depth miniature
+      // AND the pickup shrink (full size through the words, half once the
+      // chopper takes him) — while farD stages only the GROUND he stands over
+      const figS = P ? P.apD : 1;
       const px = P ? x + P.don.col * B.colW * s : x;
-      const py = P ? farD.gy - P.don.y * s * farD.ds : gy;
+      const py = P ? farD.gy - P.don.y * s : gy;   // don.y already carries the scale
       const hangK = P ? (P.don.hangK || 0) : 0;
       if (!pastHorizon) {
         if (P.airborne) {
           // the higher he is, the wider and fainter the contact patch under him
-          const k = clamp((P.don.y - 182) / 140, 0, 1);
-          shadowAt(px, 0.8 + k * 0.7, 0.3 - k * 0.13, farD.gy, s * farD.ds);
+          const k = clamp((P.don.y - 182 * figS) / 140, 0, 1);
+          shadowAt(px, 0.8 + k * 0.7, 0.3 - k * 0.13, farD.gy, s * figS);
         } else {
-          shadowAt(px, 1, 0.3, farD.gy, s * farD.ds);
+          shadowAt(px, 1, 0.3, farD.gy, s * figS);
         }
         ctx.save();
+        // DIZZY: a slow, erratic sway on his feet while the chopper comes
+        const fy = py + 182 * figS;
+        if (dizK > 0.02 && !P.airborne) {
+          ctx.translate(px, fy);
+          ctx.rotate(G.DONDIZZY.sway(time) * 0.075 * dizK);
+          ctx.translate(-px, -fy);
+        }
         ctx.translate(px, py);
         // the hoist takes him round to HORIZONTAL (hangK) — feet first, head
         // trailing — and spins him on the way down; the rope holds his
         // harness, so the body is hung one chest-height under that point
         ctx.rotate(-hangK * 1.5 - (P.don.flying ? (D.dropK || 0) * 6.6 : 0));
-        ctx.translate(0, 182 * farD.ds);
-        if (farD.ds !== 1) ctx.scale(farD.ds, farD.ds);
-        G.Sprites.drawZombie(ctx, donOpts({ pose: 'hold' }), time);
+        ctx.translate(0, 182 * figS);
+        if (figS !== 1) ctx.scale(figS, figS);
+        G.Sprites.drawZombie(ctx, donOpts({ pose: 'hold', dizzy: dizK }), time);
+        // the wobbly halo lives in FIGURE space, so it rides every sway —
+        // (−4, −192) is his head's own centre in this authoring space
+        if (dizK > 0.02 && !P.airborne) this.drawDizzyHalo(ctx, -4, -192, 1, time, dizK);
         ctx.restore();
       }
       if (!P) return;
@@ -3881,6 +4378,47 @@
         + Math.sin(time * 3.1) * 0.03;
       this.drawHeli2D(ctx, hx, hy, s * farH.ds, flip, tilt, time, 1);
     }
+    /* THE DIZZY HALO — six cartoon stars wobbling around his head on a
+       tilted, drifting ellipse, plus one soft golden glow. Drawn in the
+       FIGURE's own space (feet at the origin, sprite px), so it inherits
+       whatever sway the body already has and shrinks with his staging. */
+    drawDizzyHalo(ctx, hx, hy, s, time, dizK) {
+      const DZ = G.DONDIZZY, N = 6;
+      ctx.save();
+      ctx.translate(hx, hy);
+      ctx.globalCompositeOperation = 'lighter';
+      const gr = ctx.createRadialGradient(0, 0, 4, 0, 0, 62 * s);
+      gr.addColorStop(0, `rgba(255,214,90,${0.20 * dizK})`);
+      gr.addColorStop(1, 'rgba(255,214,90,0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(0, 0, 62 * s, 0, Math.PI * 2); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      for (let i = 0; i < N; i++) {
+        const st = DZ.star(i, N, time);
+        const sc = s * (0.8 + 0.25 * Math.sin(time * 5 + i * 2.4));
+        ctx.save();
+        ctx.translate(st.x * s, st.y * s);
+        ctx.rotate(st.th * 1.6 + time * 3.1 + i);
+        ctx.globalAlpha = (0.45 + 0.55 * dizK) * (0.82 + 0.18 * Math.sin(time * 3.7 + i));
+        this.dizzyStar(ctx, 10.5 * sc);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+    dizzyStar(ctx, r) {
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const rr = i % 2 ? r * 0.44 : r;
+        const sx = Math.cos(a) * rr, sy = Math.sin(a) * rr;
+        if (i) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#ffd23f'; ctx.fill();
+      ctx.strokeStyle = '#7c4c06'; ctx.lineWidth = Math.max(1.4, r * 0.2); ctx.lineJoin = 'round'; ctx.stroke();
+      ctx.fillStyle = '#fff3b8';
+      ctx.beginPath(); ctx.arc(0, 0, r * 0.3, 0, Math.PI * 2); ctx.fill();
+    }
     /* THE HOLE. Drawn on the SHARED overlay — it works in both render paths
        (the 3D lawn is opaque, so the sunken body is already cut off by it; the
        hole simply covers the seam) and it is where the fire comes from. */
@@ -3895,7 +4433,8 @@
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         const gr = ctx.createRadialGradient(x, gy, 2, x, gy, 170 * s * rk);
-        const flick = 0.42 + Math.sin(time * 19) * 0.07 + Math.sin(time * 6.1) * 0.05;
+        const flick = (0.42 + Math.sin(time * 19) * 0.07 + Math.sin(time * 6.1) * 0.05)
+          * (0.72 + 0.42 * (D.furyK || 0));   // a furious hole burns brighter
         gr.addColorStop(0, `rgba(255,150,50,${0.5 * flick * rk})`);
         gr.addColorStop(0.55, `rgba(255,110,30,${0.22 * flick * rk})`);
         gr.addColorStop(1, 'rgba(255,80,20,0)');

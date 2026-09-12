@@ -19,6 +19,18 @@
 'use strict';
 (function () {
   const T = THREE;
+  /* ============================================================
+     COLOUR MANAGEMENT — the single most important line in this file.
+     With r149's legacy colour pipeline the renderer sRGB-ENCODES an
+     already-sRGB material colour, which crushes the palette toward
+     mid-grey: dark cloth reads as grey felt, near-white eye whites went
+     cream, and every hue drifted. That double gamma is exactly what the
+     old hand-rolled `expose()` compensation was fighting, and why the
+     3D cast never matched the 2D painter's tones. With colour management
+     on, a material authored at the roster hex LANDS on that hex under
+     neutral light — so the 3D path and the 2D path finally agree.
+     ============================================================ */
+  if (T.ColorManagement) T.ColorManagement.legacyMode = false;
   const K = 10 / 88;                    // world units per sprite px
   const COL_W3D = 10;                   // wu per column
   // Deep lane pitch for the wide-lens rig: ~190 sprite-px between lane
@@ -78,12 +90,80 @@
   // zombies get their own harder toon ramp: deeper shadow bands make the
   // rounded forms read as volumes under the dusk key light
   const GRAD_Z = makeGradientMap(new Uint8Array([46, 120, 196, 255]));
+  // metal gets a five-stop ramp with a HOT top band — the extra stop is what
+  // separates "steel" from "grey felt" without a specular pass
+  const GRAD_M = makeGradientMap(new Uint8Array([38, 92, 158, 226, 255]));
+
+  /* ============================================================
+     RIM LIGHT — the single biggest readability win on a character.
+     A toon ramp gives flat bands; a fresnel rim separates the figure
+     from the lawn behind it and gives every rounded form an edge that
+     reads at gameplay size. Patched into the toon fragment shader
+     (r149: the injection point is <output_fragment>; the shader already
+     carries the vViewPosition varying and a view-space `normal`).
+     ============================================================ */
+  const RIM_CHUNK = [
+    '#include <output_fragment>',
+    '{',
+    '  vec3 rimN = normalize( normal );',
+    '  vec3 rimV = normalize( vViewPosition );',
+    '  float rimK = pow( 1.0 - clamp( dot( rimN, rimV ), 0.0, 1.0 ), uRimPower );',
+    '  gl_FragColor.rgb += uRimColor * rimK * uRimStrength;',
+    '}',
+  ].join('\n');
+
+  function rim(mat, color, power, strength) {
+    const col = new T.Color(color);
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uRimColor = { value: col };
+      sh.uniforms.uRimPower = { value: power };
+      sh.uniforms.uRimStrength = { value: strength };
+      sh.fragmentShader =
+        'uniform vec3 uRimColor;\nuniform float uRimPower;\nuniform float uRimStrength;\n' + sh.fragmentShader;
+      sh.fragmentShader = sh.fragmentShader.replace('#include <output_fragment>', RIM_CHUNK);
+    };
+    // without a cache key every rim variant compiles to the same program
+    mat.customProgramCacheKey = () => 'rim' + col.getHexString() + power.toFixed(2) + strength.toFixed(2);
+    mat.needsUpdate = true;
+    return mat;
+  }
+  R3.rim = rim;
+
+  /* ---------------- material classes ----------------
+     cloth: matte, wide soft ramp, strong rim (the silhouette cue)
+     skin : matte but a tighter rim, slightly warmer
+     metal: 5-stop hot ramp, blown rim
+     eye  : near-white, untouched by the exposure push, low rim */
+  const LOOK = {
+    cloth: { color: 0xffd6a8, power: 2.2, strength: 0.30 },
+    skin: { color: 0xffd2a0, power: 2.6, strength: 0.26 },
+    metal: { color: 0xdff0ff, power: 1.9, strength: 0.30 },
+    prop: { color: 0xffe0b4, power: 2.4, strength: 0.34 },
+    eye: { color: 0xffffff, power: 3.0, strength: 0.10 },
+    scenery: { color: 0xffd0a0, power: 3.0, strength: 0.16 },
+  };
   function toon(color, opts = {}) {
-    return new T.MeshToonMaterial(Object.assign({ color, gradientMap: GRAD }, opts));
+    const m = new T.MeshToonMaterial(Object.assign({ color, gradientMap: GRAD }, opts.flags || {}));
+    const l = LOOK[opts.cls] || null;
+    if (l && opts.rim !== false) rim(m, opts.rimColor || l.color, opts.rimPower || l.power, opts.rimStrength === undefined ? l.strength : opts.rimStrength);
+    return m;
   }
   function toonZ(color, opts = {}) {
-    return new T.MeshToonMaterial(Object.assign({ color, gradientMap: GRAD_Z }, opts));
+    const cls = opts.cls || 'cloth';
+    const l = LOOK[cls] || LOOK.cloth;
+    const m = new T.MeshToonMaterial(Object.assign(
+      { color, gradientMap: cls === 'metal' ? GRAD_M : GRAD_Z }, opts.flags || {}));
+    if (opts.rim !== false) rim(m, opts.rimColor || l.color, opts.rimPower || l.power, opts.rimStrength === undefined ? l.strength : opts.rimStrength);
+    return m;
   }
+  /* FLAT — unlit, for the tiny high-value details that must never take the
+     scene's colour cast: eye whites, pupils, teeth. The warm fill turned
+     sclera yellow in every capture; an unlit material keeps them clean and
+     also makes the eyes pop at gameplay size. */
+  function flat(color, opts = {}) {
+    return new T.MeshBasicMaterial(Object.assign({ color }, opts.flags || {}));
+  }
+  R3.toon = toon; R3.toonZ = toonZ; R3.flat = flat; R3.GRAD_M = GRAD_M;
 
   function buildSharedGeo() {
     GEO.box = new T.BoxGeometry(1, 1, 1);
@@ -103,7 +183,19 @@
     GEO.torus = new T.TorusGeometry(1, 0.18, 10, 18);
     GEO.torusHi = new T.TorusGeometry(1, 0.14, 8, 22);
     GEO.blobGeo = new T.CircleGeometry(1, 26);
-    R3.blobMat = new T.MeshBasicMaterial({ color: 0x0c1608, transparent: true, opacity: 0.55, depthWrite: false });
+    /* Contact shadow: a radial falloff texture, not a flat disc. A hard-edged
+       disc reads as a hole punched in the lawn; the soft core keeps the foot
+       planted and the feathered edge lets it sit under the grass tone. */
+    const btex = canvasTex(64, 64, (c, w, h) => {
+      const g = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      g.addColorStop(0.00, 'rgba(10,18,7,0.98)');
+      g.addColorStop(0.38, 'rgba(12,22,9,0.80)');
+      g.addColorStop(0.66, 'rgba(16,28,11,0.40)');
+      g.addColorStop(0.86, 'rgba(20,34,14,0.12)');
+      g.addColorStop(1.00, 'rgba(24,40,16,0)');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+    });
+    R3.blobMat = new T.MeshBasicMaterial({ map: btex, transparent: true, opacity: 0.88, depthWrite: false, color: 0xffffff });
   }
 
   function mesh(geo, mat, sx, sy, sz, x, y, z) {
@@ -128,49 +220,64 @@
     });
     R3.scene.background = tex;
     // telephoto rig: camera sits ~575 wu out — keep fog beyond the whole
-    // scene or everything washes to a flat silhouette
-    R3.scene.fog = new T.Fog(0xd88a6a, 900, 2200);
+    // scene or everything washes to a flat silhouette. Brought in close
+    // enough to actually layer: the back fence and hills sit in real haze,
+    // which is what gives the lawn any depth at all.
+    R3.scene.fog = new T.Fog(0xe0a273, 230, 950);
   }
 
   function buildLawn() {
     // 4 lanes x 10 cols checkerboard + mow stripes + blade noise
     const tex = canvasTex(1000, 392, (c, w, h) => {
       const cw = w / 10, ch = h / 4;
+      /* Checker contrast matters: at this camera a 3% value split between the
+         squares is invisible and the whole board flattens into one green. */
       for (let r = 0; r < 4; r++) for (let u = 0; u < 10; u++) {
-        c.fillStyle = (r + u) % 2 ? '#68b04a' : '#74bc54';
+        c.fillStyle = (r + u) % 2 ? '#5ea33f' : '#77c257';
         c.fillRect(u * cw, r * ch, cw, ch);
       }
-      // mow stripes: every other column slightly lighter
-      c.globalAlpha = 0.06;
+      // mow stripes: every other column lighter, strong enough to read as mown turf
+      c.globalAlpha = 0.10;
       for (let u = 0; u < 10; u += 2) { c.fillStyle = '#ffffff'; c.fillRect(u * cw, 0, cw, h); }
+      // a second, finer stripe set across the lanes = the mower turn pattern
+      c.globalAlpha = 0.07;
+      for (let r = 0; r < 4; r += 2) { c.fillStyle = '#0d2f10'; c.fillRect(0, r * ch, w, ch * 0.5); }
       c.globalAlpha = 1;
       // worn patches + clover — quiet mid-field variation so the lawn never
       // reads as an empty checkerboard
-      for (let i = 0; i < 9; i++) {
-        const px = Math.random() * w, py = Math.random() * h, pr = 24 + Math.random() * 46;
+      for (let i = 0; i < 16; i++) {
+        const px = Math.random() * w, py = Math.random() * h, pr = 26 + Math.random() * 54;
         const wg = c.createRadialGradient(px, py, pr * 0.2, px, py, pr);
-        wg.addColorStop(0, 'rgba(150,120,60,0.10)');
+        const dry = Math.random() < 0.55;
+        wg.addColorStop(0, dry ? 'rgba(156,126,62,0.16)' : 'rgba(46,96,34,0.16)');
         wg.addColorStop(1, 'rgba(150,120,60,0)');
         c.fillStyle = wg;
         c.beginPath(); c.arc(px, py, pr, 0, Math.PI * 2); c.fill();
       }
-      c.globalAlpha = 0.5;
-      for (let i = 0; i < 26; i++) {
+      // dirt wear along the fence lines (top + bottom edges of the board)
+      for (const [y0, y1] of [[0, 20], [h - 22, h]]) {
+        const gg = c.createLinearGradient(0, y0, 0, y1);
+        gg.addColorStop(0, 'rgba(96,74,40,0.34)');
+        gg.addColorStop(1, 'rgba(96,74,40,0)');
+        c.fillStyle = gg; c.fillRect(0, y0, w, y1 - y0);
+      }
+      c.globalAlpha = 0.55;
+      for (let i = 0; i < 44; i++) {
         const px = Math.random() * w, py = Math.random() * h;
-        c.fillStyle = Math.random() < 0.5 ? '#7cc95e' : '#8fd46a';
+        c.fillStyle = Math.random() < 0.5 ? '#86d164' : '#9ade72';
         for (let b = 0; b < 3; b++) {
           c.beginPath(); c.ellipse(px + (b - 1) * 4, py - b * 2, 3, 2, b * 0.6, 0, Math.PI * 2); c.fill();
         }
       }
       c.globalAlpha = 1;
       // grass blade noise
-      for (let i = 0; i < 2600; i++) {
-        c.fillStyle = Math.random() < 0.5 ? 'rgba(40,90,30,0.25)' : 'rgba(200,255,170,0.18)';
+      for (let i = 0; i < 4200; i++) {
+        c.fillStyle = Math.random() < 0.5 ? 'rgba(34,80,26,0.30)' : 'rgba(206,255,176,0.22)';
         const x = Math.random() * w, y = Math.random() * h;
         c.fillRect(x, y, 2, 3);
       }
       // faint lane divider lines
-      c.strokeStyle = 'rgba(30,70,25,0.20)'; c.lineWidth = 3;
+      c.strokeStyle = 'rgba(24,60,20,0.26)'; c.lineWidth = 3;
       for (let r = 1; r < 4; r++) { c.beginPath(); c.moveTo(0, r * ch); c.lineTo(w, r * ch); c.stroke(); }
       // soil border
       c.strokeStyle = 'rgba(70,50,28,0.55)'; c.lineWidth = 14;
@@ -286,14 +393,71 @@
     R3.scene.add(backdrop);
   }
 
+  /* ---------------- surface grain ----------------
+     Flat toon panels are the fastest way to look unfinished at gameplay size:
+     a fence, a roof and a wall in one flat colour read as painted cardboard.
+     These three cheap canvas textures put grain on them without a shader. */
+  function plankTex(base, dark, light, cols) {
+    return canvasTex(256, 128, (c, w, h) => {
+      c.fillStyle = base; c.fillRect(0, 0, w, h);
+      const n = cols || 6, pw = w / n;
+      for (let i = 0; i < n; i++) {
+        c.fillStyle = i % 2 ? dark : base;
+        c.globalAlpha = 0.22; c.fillRect(i * pw, 0, pw, h); c.globalAlpha = 1;
+        c.strokeStyle = dark; c.lineWidth = 1.6; c.globalAlpha = 0.5;
+        c.beginPath(); c.moveTo(i * pw, 0); c.lineTo(i * pw, h); c.stroke(); c.globalAlpha = 1;
+      }
+      for (let i = 0; i < 260; i++) {
+        c.fillStyle = Math.random() < 0.5 ? dark : light;
+        c.globalAlpha = 0.10 + Math.random() * 0.10;
+        c.fillRect(Math.random() * w, Math.random() * h, 8 + Math.random() * 30, 1.2);
+      }
+      c.globalAlpha = 1;
+    });
+  }
+  function tileTex(base, dark, light) {
+    return canvasTex(256, 256, (c, w, h) => {
+      c.fillStyle = base; c.fillRect(0, 0, w, h);
+      const rows = 8, cols = 6, rh = h / rows, cw = w / cols;
+      for (let r = 0; r < rows; r++) {
+        for (let i = 0; i < cols; i++) {
+          const off = (r % 2) * cw * 0.5;
+          const x = i * cw + off - cw * 0.5, y = r * rh;
+          c.fillStyle = (i + r) % 2 ? base : light;
+          c.fillRect(x + 1, y + 1, cw - 2, rh - 2);
+          c.strokeStyle = dark; c.lineWidth = 2; c.strokeRect(x + 1, y + 1, cw - 2, rh - 2);
+        }
+      }
+      // grime in the course lines
+      c.globalAlpha = 0.25; c.fillStyle = dark;
+      for (let r = 0; r < rows; r++) c.fillRect(0, r * rh, w, 2);
+      c.globalAlpha = 1;
+    });
+  }
+
   function buildFence() {
     const g = new T.Group();
-    const wood = toon(0xe9e2cf), wood2 = toon(0xd8cdb2);
+    /* Cream pickets with GRAIN, POINTED tips, post caps and a per-picket wobble.
+       A row of identical flat slabs is what made the old fence read as plastic. */
+    const woodTex = plankTex('#e9e2cf', '#b8ad90', '#fffaf0', 5);
+    const wood = toon(0xffffff, { cls: 'scenery', flags: { map: woodTex } });
+    const wood2 = toon(0xd8cdb2, { cls: 'scenery' });
+    const woodD = toon(0xb9ad90, { cls: 'scenery' });
     const zBack = -1.5 * LANE_D3D - PX(30);
     const x0 = -COL_W3D * 5 - PX(16), x1 = COL_W3D * 5 + PX(70);
-    for (let x = x0; x <= x1; x += PX(19)) {
-      const p = mesh(GEO.box, wood, PX(7), PX(30), PX(2.4), x, PX(15), zBack);
+    let i = 0;
+    for (let x = x0; x <= x1; x += PX(19), i++) {
+      const hh = PX(30) * (0.97 + ((i * 37) % 7) * 0.009);
+      const p = mesh(GEO.box, wood, PX(7), hh, PX(2.4), x, hh / 2 + PX(2.2), zBack);
+      p.rotation.z = (((i * 53) % 5) - 2) * 0.006;
       p.receiveShadow = true; g.add(p);
+      const cap = mesh(GEO.coneHi, wood, PX(5.4), PX(5), PX(2.4), x, hh + PX(2.2) + PX(2.2), zBack);
+      cap.rotation.y = Math.PI / 2; g.add(cap);
+    }
+    // posts every 6th picket, with a cap and a shadow line
+    for (let j = 0, x = x0; x <= x1; x += PX(19) * 6, j++) {
+      g.add(mesh(GEO.box, woodD, PX(10), PX(36), PX(4.4), x, PX(18), zBack - PX(1)));
+      g.add(mesh(GEO.box, wood2, PX(12), PX(3), PX(5.4), x, PX(36), zBack - PX(1)));
     }
     g.add(mesh(GEO.box, wood2, x1 - x0, PX(4), PX(2), (x0 + x1) / 2, PX(24), zBack));
     g.add(mesh(GEO.box, wood2, x1 - x0, PX(4), PX(2), (x0 + x1) / 2, PX(9), zBack));
@@ -313,13 +477,25 @@
      ============================================================ */
   function buildCottage() {
     const g = new T.Group();
-    const wall = toon(0xe3d3ae);
-    const roof = toon(0x9c452f), roofD = toon(0x78331f);
-    const timber = toon(0x66452a), timberD = toon(0x4d331e);
-    const stone = toon(0x8f8a7e), stoneD = toon(0x736e63);
+    /* Real surface texture on the three biggest flat areas — roof tiles, wall
+       planks and a stone base — because a cottage made of untextured slabs
+       reads as a toy no matter how good its silhouette is. */
+    const roofTex = tileTex('#a0492f', '#6d2f1c', '#bd5c3c');
+    roofTex.wrapS = roofTex.wrapT = T.RepeatWrapping; roofTex.repeat.set(3, 2);
+    const wallTex = plankTex('#e3d3ae', '#bda87c', '#f6ecd4', 7);
+    wallTex.wrapS = wallTex.wrapT = T.RepeatWrapping; wallTex.repeat.set(2, 2);
+    const stoneTex = tileTex('#8f8a7e', '#6a655b', '#a5a094');
+    stoneTex.wrapS = stoneTex.wrapT = T.RepeatWrapping; stoneTex.repeat.set(4, 1);
+    const wall = toon(0xffffff, { cls: 'scenery', flags: { map: wallTex } });
+    const roof = toon(0xffffff, { cls: 'scenery', flags: { map: roofTex } });
+    const roofD = toon(0x78331f, { cls: 'scenery' });
+    const stone = toon(0xffffff, { cls: 'scenery', flags: { map: stoneTex } });
+    const stoneD = toon(0x736e63, { cls: 'scenery' });
+    const timber = toon(0x66452a, { cls: 'scenery' }), timberD = toon(0x4d331e, { cls: 'scenery' });
     const lit = new T.MeshBasicMaterial({ color: 0xffd98a });
-    const dark = toon(0x2c2a24);
-    const leaf = toon(0x4e8a3c);
+    const glass = new T.MeshBasicMaterial({ color: 0xffeec2, transparent: true, opacity: 0.55 });
+    const dark = toon(0x2c2a24, { cls: 'scenery' });
+    const leaf = toon(0x4e8a3c, { cls: 'scenery' });
 
     const W = 24, D = 19;            // width, depth
     const Y0 = 2.4, Y1 = 20.5;       // floor slab top, eaves
@@ -329,7 +505,12 @@
     const add = (geo, mat, sx, sy, sz, x, y, z) => { const m = mesh(geo, mat, sx, sy, sz, x, y, z); g.add(m); return m; };
 
     // ---- masonry base + walls
+    // ---- masonry base: individual stones on the front face, not one slab
     add(GEO.box, stoneD, W + 1.6, Y0, D + 1.6, 0, Y0 / 2, 0);
+    for (let i = 0; i < 9; i++) {
+      const sx2 = 3.2 + ((i * 17) % 5) * 0.32;
+      add(GEO.box, i % 3 ? stone : stoneD, sx2, 2.0, 0.9, -half + 1.4 + i * 3.1, 1.2 + (i % 2) * 1.1, zf + 0.6);
+    }
     add(GEO.box, wall, W, Y1 - Y0, D, 0, (Y0 + Y1) / 2, 0);
     // ---- jettied upper storey, slightly wider than the base (storybook)
     add(GEO.box, wall, W + 3, J1 - Y1, D + 2.4, 0, (Y1 + J1) / 2, 0);
@@ -370,18 +551,20 @@
       const br = add(GEO.box, timber, 1.3, 8, 1.0, s * (half - 4.2), (Y0 + Y1) / 2, fz);
       br.rotation.z = s * 0.62;
     }
-    // two ground-floor windows: frame, lit pane, mullion, shutters, flower box
+    // two ground-floor windows: frame, lit pane, mullions, shutters, flower box
     for (const wx of [-5.6, 5.4]) {
       add(GEO.box, dark, 6.0, 7.0, 0.7, wx, 13.0, fz);
       add(GEO.box, lit, 4.7, 5.7, 0.5, wx, 13.0, fz + 0.5);
+      add(GEO.box, glass, 4.7, 5.7, 0.3, wx, 13.0, fz + 0.62);
       add(GEO.box, timber, 0.6, 5.7, 0.5, wx, 13.0, fz + 0.85);
       add(GEO.box, timber, 4.7, 0.6, 0.5, wx, 13.0, fz + 0.85);
+      add(GEO.box, timber, 4.7, 0.34, 0.5, wx, 11.0, fz + 0.85);   // extra muntin
       add(GEO.box, timber, 7.2, 1.0, 1.9, wx, 9.3, fz + 0.35);   // sill
       for (const s of [-1, 1]) add(GEO.box, roofD, 1.7, 7.6, 0.9, wx + s * 4.2, 13.0, fz + 1.0);
       add(GEO.box, timber, 6.0, 1.7, 2.1, wx, 8.3, fz + 0.8);    // window box
       for (let i = 0; i < 4; i++) {
         const fx2 = wx - 2.2 + i * 1.5;
-        add(GEO.sphereLo, i % 2 ? toon(0xd8586a) : toon(0xe8b84a), 0.8, 0.8, 0.8, fx2, 9.6, fz + 1.3);
+        add(GEO.sphereLo, i % 2 ? toon(0xd8586a, { cls: 'scenery' }) : toon(0xe8b84a, { cls: 'scenery' }), 0.8, 0.8, 0.8, fx2, 9.6, fz + 1.3);
         add(GEO.box, leaf, 0.3, 1.1, 0.3, fx2, 9.0, fz + 1.1);
       }
     }
@@ -481,8 +664,8 @@
          swallows the sunset horizon. Out past the fence line there is room,
          so the big ones grow at the ends and the centre stays low scrub. */
       const outside = Math.abs(x) > COL_W3D * 5;
-      if (i % 9 === 4 || outside) {
-        const th = h * (outside ? 3.0 : 1.5);
+      if (i % 7 === 4 || outside) {
+        const th = h * (outside ? 2.2 + ((i * 13) % 5) * 0.28 : 1.5);
         bush.add(mesh(GEO.cyl, toon(0x6a4a2c), outside ? 2.0 : 1.2, th * 0.5, outside ? 2.0 : 1.2, 0, th * 0.25, 0));
         bush.add(mesh(GEO.cone, mH3, h * (outside ? 1.25 : 0.7), th * 0.8, h * (outside ? 1.25 : 0.7), 0, th * 0.75, 0));
         if (outside) bush.add(mesh(GEO.sphere, mH2, h * 0.9, h * 0.6, h * 0.9, 0, th * 0.55, 0));
@@ -500,11 +683,24 @@
     // low picket framing the near edge — grounds the board like BTD6 map
     // borders, kept short so row 3 never occludes
     const g = new T.Group();
-    const wood = toon(0xe4dcc6), wood2 = toon(0xd2c6aa);
+    const woodTex = plankTex('#e4dcc6', '#b3a88c', '#f7f1e2', 5);
+    const wood = toon(0xffffff, { cls: 'scenery', flags: { map: woodTex } });
+    const wood2 = toon(0xd2c6aa, { cls: 'scenery' });
+    const woodD = toon(0xb0a48a, { cls: 'scenery' });
     const zN = 1.5 * LANE_D3D + PX(52);
     const x0 = -COL_W3D * 5 - PX(30), x1 = COL_W3D * 5 + PX(90);
-    for (let x = x0; x <= x1; x += PX(19)) {
-      g.add(mesh(GEO.box, wood, PX(6), PX(20), PX(2.2), x, PX(10), 0));
+    let i = 0;
+    for (let x = x0; x <= x1; x += PX(19), i++) {
+      const hh = PX(20) * (0.97 + ((i * 41) % 7) * 0.009);
+      const p = mesh(GEO.box, wood, PX(6), hh, PX(2.2), x, hh / 2 + PX(1.6), 0);
+      p.rotation.z = (((i * 29) % 5) - 2) * 0.008;
+      p.receiveShadow = true; g.add(p);
+      const cap = mesh(GEO.coneHi, wood, PX(4.6), PX(4.4), PX(2.2), x, hh + PX(1.6) + PX(1.9), 0);
+      cap.rotation.y = Math.PI / 2; g.add(cap);
+    }
+    for (let x = x0; x <= x1; x += PX(19) * 7) {
+      g.add(mesh(GEO.box, woodD, PX(9), PX(26), PX(4), x, PX(13), -PX(1)));
+      g.add(mesh(GEO.box, wood2, PX(11), PX(3), PX(5), x, PX(26), -PX(1)));
     }
     g.add(mesh(GEO.box, wood2, x1 - x0, PX(3.4), PX(2), (x0 + x1) / 2, PX(16), 0));
     g.add(mesh(GEO.box, wood2, x1 - x0, PX(3.4), PX(2), (x0 + x1) / 2, PX(6), 0));
@@ -516,10 +712,10 @@
   function buildDressing() {
     // scatter props across the meadow voids — bushes, flowers, rocks
     const rng = (a, b) => a + Math.random() * (b - a);
-    const mBush = [toon(0x2f6e30), toon(0x3a8038), toon(0x275c28)];
-    const mRock = toon(0x9a9c92), mRockD = toon(0x84867c);
-    const mFlow = [toon(0xe86a8a), toon(0xf0c040), toon(0xffffff), toon(0xd66ae8)];
-    const mStem = toon(0x3a7d38);
+    const mBush = [toon(0x2f6e30, { cls: 'scenery' }), toon(0x3a8038, { cls: 'scenery' }), toon(0x275c28, { cls: 'scenery' })];
+    const mRock = toon(0x9a9c92, { cls: 'scenery' }), mRockD = toon(0x84867c, { cls: 'scenery' });
+    const mFlow = [toon(0xe86a8a, { cls: 'scenery' }), toon(0xf0c040, { cls: 'scenery' }), toon(0xffffff, { cls: 'scenery' }), toon(0xd66ae8, { cls: 'scenery' })];
+    const mStem = toon(0x3a7d38, { cls: 'scenery' });
     function bush(x, z, s) {
       const g = new T.Group();
       for (let b = 0; b < 3; b++) {
@@ -529,6 +725,45 @@
       g.position.set(x, 0, z);
       g.traverse(o => { if (o.isMesh) o.castShadow = true; });
       R3.scene.add(g);
+    }
+    /* GRASS SCATTER. The critic's top environment note was "no ground scatter" —
+       a painted lawn is a plane no matter how good its texture is. These tufts
+       are cheap crossed cones and they stay OFF the play columns (|x| > 50) and
+       outside the lane footprint, so they can never occlude a zombie. */
+    function tuft(x, z, s) {
+      const g2 = new T.Group();
+      /* Lighter and shorter than the bushes: 6-13px dark cones read as tiny fir
+         trees on the meadow, not as turf. These sit at the lawn's own value. */
+      const blades = [toon(0x62b247, { cls: 'scenery' }), toon(0x71c252, { cls: 'scenery' }), toon(0x559b3f, { cls: 'scenery' })];
+      for (let b = 0; b < 3; b++) {
+        const a = Math.random() * Math.PI * 2;
+        const blade = mesh(GEO.coneHi, blades[b], rng(0.9, 1.5) * s, rng(3.5, 7) * s, rng(0.9, 1.5) * s,
+          rng(-2, 2) * s, rng(1.8, 3.6) * s, rng(-2, 2) * s);
+        blade.rotation.z = rng(-0.5, 0.5); blade.rotation.x = Math.sin(a) * 0.35;
+        g2.add(blade);
+      }
+      g2.position.set(x, 0, z);
+      R3.scene.add(g2);
+    }
+    for (let i = 0; i < 80; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      tuft(side * rng(52, 235), rng(-100, 96), rng(0.8, 1.5));
+    }
+    // and a light dusting right along the board's own soil border
+    for (let i = 0; i < 30; i++) {
+      const alongX = Math.random() < 0.5;
+      const x = alongX ? rng(-62, 126) : (Math.random() < 0.5 ? -1 : 1) * rng(48, 60);
+      const z = alongX ? (Math.random() < 0.5 ? rng(-62, -52) : rng(52, 62)) : rng(-60, 62);
+      tuft(x, z, rng(0.7, 1.3));
+    }
+    // pebbles for ground interest
+    for (let i = 0; i < 26; i++) {
+      const p = new T.Group();
+      p.add(mesh(GEO.iron, Math.random() < 0.5 ? mRock : mRockD, rng(1.2, 3.4), rng(0.8, 1.8), rng(1.2, 3.0), 0, 0.6, 0));
+      p.position.set((Math.random() < 0.5 ? -1 : 1) * rng(52, 220), 0, rng(-100, 96));
+      p.rotation.y = Math.random() * 3;
+      p.traverse(o => { if (o.isMesh) o.castShadow = true; });
+      R3.scene.add(p);
     }
     function flower(x, z) {
       const g = new T.Group();
@@ -710,8 +945,15 @@
      is exactly what killed the old cast. Zombie materials are therefore
      authored DOWN: darker, more saturated, so what lands on screen
      matches the 2D palette instead of a washed-out cousin of it. */
-  const EXPO = { l: 0.60, s: 1.45, h: 0.035 };
-  function expose(col) {
+  /* Exposure compensation now only fine-tunes: with colour management on,
+     E = identity renders the authored palette 1:1. Anything above 1 would
+     re-introduce the blow-out the old build was compensating for. */
+  const EXPO = { l: 1.0, s: 1.0, h: 0.0 };
+  /* expose() is the ONE place the authored palette is bent to survive the
+     scene's lighting, so the calibration probe needs to re-run it with a
+     different lightness stop — hence the override argument + R3 hook. */
+  function expose(col, lOverride) {
+    const EXPO_L = lOverride === undefined ? EXPO.l : lOverride;
     const c = new T.Color(col);
     const hsl = { h: 0, s: 0, l: 0 };
     c.getHSL(hsl);
@@ -721,10 +963,13 @@
     const w = Math.max(0, Math.min(1, (hsl.s - 0.22) / 0.28));
     const h = (hsl.h + EXPO.h * w + 1) % 1;
     const s = Math.min(1, hsl.s * (1 + (EXPO.s - 1) * w));
-    const l = Math.max(0, hsl.l * (1 - (1 - EXPO.l) * w));
+    const l = Math.max(0, hsl.l * (1 - (1 - EXPO_L) * w));
     c.setHSL(h, s, l);
     return c.getHex();
   }
+  R3.expose = expose;
+  R3.exposeHex = (col, lOverride) => '#' + new T.Color(expose(col, lOverride)).getHexString();
+  R3.EXPO = EXPO;
 
   /* prop builders, keyed by the same ids the 2D painter uses.
      Each returns a Group whose origin is the documented anchor. */
@@ -739,14 +984,15 @@
       b.add(mesh(GEO.cylHi, band, PX(8.8), PX(3.0), PX(8.8), 0, PX(38), 0));
       g.add(b); return b;
     },
-    bucket(g, M_) {
-      const m = M_('#b6bfc8'), mD = M_('#7c858e'), mH = M_('#e2e9ef');
+    bucket(g, M_, MK_) {
+      const MK = MK_ || M_;
+      const m = MK('#b6bfc8'), mD = MK('#7c858e'), mH = MK('#e2e9ef');
       const b = new T.Group(); b.rotation.z = 0.07;
       // rim rides just above the brow so the whole face stays readable
       b.add(mesh(GEO.cylHi, m, PX(18.5), PX(40), PX(18.5), 0, PX(42), 0));    // spans 22..62
       b.add(mesh(GEO.cylHi, mH, PX(19.2), PX(5), PX(19.2), 0, PX(60), 0));    // rim
       b.add(mesh(GEO.cylHi, mD, PX(18.8), PX(4), PX(18.8), 0, PX(23), 0));    // bottom lip
-      const bail = mesh(GEO.torus, mD, PX(21), PX(21), PX(13), 0, PX(59), 0);
+      const bail = mesh(GEO.torus, mD, PX(15), PX(15), PX(9), 0, PX(58), 0);
       bail.rotation.y = Math.PI / 2; b.add(bail);
       const d1 = mesh(GEO.sphereLo, mD, PX(6), PX(3.8), PX(6), -PX(15), PX(40), 0);    // dent
       const d2 = mesh(GEO.sphereLo, mD, PX(4.6), PX(3.2), PX(4.6), PX(14), PX(52), 0); // dent
@@ -757,8 +1003,9 @@
       b.userData.tint = m;
       g.add(b); return b;
     },
-    helmet(g, M_) {
-      const c = M_('#cf3b31'), cD = M_('#8d1f18'), pad = M_('#e2ddcd'), met = M_('#7e8792');
+    helmet(g, M_, MK_) {
+      const MK = MK_ || M_;
+      const c = M_('#cf3b31'), cD = M_('#8d1f18'), pad = M_('#e2ddcd'), met = MK('#7e8792');
       const b = new T.Group();
       b.add(mesh(GEO.hemi, c, PX(20), PX(21), PX(20), 0, PX(16), 0));         // dome
       b.add(mesh(GEO.sphere, cD, PX(19.6), PX(4.5), PX(19.6), 0, PX(16), 0)); // shell band
@@ -811,11 +1058,12 @@
       g.add(b); return b;
     },
     /* held in the world, anchored on the body */
-    screen(g, M_) {
+    screen(g, M_, MK_) {
       // PvZ screen door: PALE painted frame + see-through crosshatch mesh +
       // yellow kick panel — the mesh must read as SCREEN, not a plank slab.
+      const MK = MK_ || M_;
       const frame = M_('#e8e2d2'), frameD = M_('#c9c2ad'), kick = M_('#e0b53c'),
-            brass = M_('#e0b53c'), latch = M_('#4a4741');
+            brass = MK('#e0b53c'), latch = M_('#4a4741');
       const b = new T.Group(); b.position.set(-PX(30), PX(60), 0); b.rotation.y = 0.45; b.rotation.z = 0.05;
       // stiles + head/sill rails (these cast the door's shadow)
       for (const s of [-1, 1]) b.add(mesh(GEO.box, frame, PX(5), PX(112), PX(9), 0, 0, s * PX(24)));
@@ -856,8 +1104,9 @@
       for (let i = 0; i < 6; i++) b.add(mesh(GEO.box, ink, PX(1), PX(2.4), PX(44), -PX(2), PX(9 - i * 6.4), 0));
       return b;
     },
-    pole(g, M_) {
-      const p = M_('#c9cfd6'), red = M_('#c0392b');
+    pole(g, M_, MK_) {
+      const MK = MK_ || M_;
+      const p = MK('#c9cfd6'), red = M_('#c0392b');
       const b = new T.Group(); b.position.set(-PX(12), PX(74), 0); b.rotation.z = 0.42;
       b.add(mesh(GEO.cylHi, p, PX(4), PX(126), PX(4), 0, 0, 0));
       b.add(mesh(GEO.cylHi, red, PX(4.6), PX(6), PX(4.6), 0, PX(40), 0));
@@ -865,16 +1114,18 @@
       b.add(mesh(GEO.sphere, p, PX(4.6), PX(3.6), PX(4.6), 0, PX(64), 0));
       return b;
     },
-    pick(g, M_) {
-      const w = M_('#a8763f'), m = M_('#9aa3ac');
+    pick(g, M_, MK_) {
+      const MK = MK_ || M_;
+      const w = M_('#a8763f'), m = MK('#9aa3ac');
       const b = new T.Group(); b.position.set(-PX(26), PX(64), 0); b.rotation.z = -0.5; b.rotation.y = 0.7;
       b.add(mesh(GEO.cylHi, w, PX(3.4), PX(70), PX(3.4), 0, 0, 0));
       b.add(mesh(GEO.box, m, PX(6), PX(7), PX(46), 0, PX(34), 0));
       b.add(mesh(GEO.coneHi, m, PX(4), PX(14), PX(4), 0, PX(40), PX(24)));
       return b;
     },
-    flag(g, M_) {
-      const p = M_('#c9cfd6'), c = M_('#c0392b'), cD = M_('#7f2018'), bone = M_('#ece8d6');
+    flag(g, M_, MK_) {
+      const MK = MK_ || M_;
+      const p = MK('#c9cfd6'), c = M_('#c0392b'), cD = M_('#7f2018'), bone = M_('#ece8d6');
       // angled forward and yawed so the banner reads from the game camera
       const b = new T.Group(); b.position.set(-PX(18), PX(104), 0);
       b.rotation.z = -0.26; b.rotation.y = 0.85;
@@ -904,6 +1155,84 @@
      is exactly the bug class that used to let shots sail through hats.
      It also makes him 2.3× a 3D zombie: the frame can hold him in rows 2-3,
      which is the only place he ever spawns. */
+  /* ---------------- the boss's FACE DECAL ----------------
+     Lifted out of buildBossModel so the DIZZY state can repaint it LIVE:
+     the eulogy calls back with blink=1 and the eyes squeeze shut (the
+     canvas texture is flagged needsUpdate), then open again. The PALE EYE
+     PATCHES are permanent — a panda mask, but cream on the orange. */
+  function drawBossFace(c, w, h, blink) {
+    const X = v => v * w, Y = v => v * h;
+    c.clearRect(0, 0, w, h);
+    c.lineJoin = 'round'; c.lineCap = 'round';
+    const OUTL = '#2a1505';
+    // brow ridge — a soft fold, NOT a black bar: the carved ridge is already
+    // there, and two dark brows stack into a unibrow
+    c.fillStyle = 'rgba(150,95,40,0.55)'; c.strokeStyle = 'rgba(42,21,5,0.55)'; c.lineWidth = 3;
+    c.beginPath();
+    c.moveTo(X(0.10), Y(0.40)); c.lineTo(X(0.92), Y(0.36));
+    c.lineTo(X(0.90), Y(0.30)); c.lineTo(X(0.08), Y(0.335));
+    c.closePath(); c.fill(); c.stroke();
+    /* The eye row sits LOW on the plate on purpose: the cap brim crosses the
+       upper third, and anything above it is occluded from the game camera. */
+    for (const [ex, sc] of [[0.31, 1.0], [0.70, 0.94]]) {
+      // THE PALE PATCH: bigger than the eye, slightly tilted, cream on orange
+      c.fillStyle = 'rgba(252,242,222,0.96)';
+      c.beginPath(); c.ellipse(X(ex), Y(0.50), X(0.185) * sc, Y(0.112) * sc, -0.05, 0, TAU_); c.fill();
+      c.strokeStyle = 'rgba(178,108,48,0.65)'; c.lineWidth = 3;
+      c.beginPath(); c.ellipse(X(ex), Y(0.50), X(0.185) * sc, Y(0.112) * sc, -0.05, 0, TAU_); c.stroke();
+      if (blink > 0.5) {
+        // THE DIZZY BLINK: squeezed shut — a heavy lid arc and a crease
+        c.strokeStyle = OUTL; c.lineWidth = 6;
+        c.beginPath();
+        c.moveTo(X(ex - 0.115), Y(0.492));
+        c.quadraticCurveTo(X(ex), Y(0.556), X(ex + 0.115), Y(0.488));
+        c.stroke();
+        c.strokeStyle = 'rgba(120,62,18,0.7)'; c.lineWidth = 4;
+        c.beginPath(); c.arc(X(ex), Y(0.515), X(0.085), 0.35, 2.75); c.stroke();
+        continue;
+      }
+      // eye white, small and wide — a squint, not a saucer
+      c.fillStyle = '#fdfbf4'; c.strokeStyle = OUTL; c.lineWidth = 3.4;
+      c.beginPath(); c.ellipse(X(ex), Y(0.50), X(0.122) * sc, Y(0.062) * sc, 0, 0, TAU_); c.fill(); c.stroke();
+      // pupil + catchlight
+      c.fillStyle = '#2e2010';
+      c.beginPath(); c.ellipse(X(ex - 0.026), Y(0.50), X(0.040) * sc, Y(0.042) * sc, 0, 0, TAU_); c.fill();
+      c.fillStyle = '#ffffff';
+      c.beginPath(); c.arc(X(ex + 0.014), Y(0.484), X(0.015), 0, TAU_); c.fill();
+      // the LID: a filled skin-coloured hood that eats the top of the eye,
+      // plus one firm line — the whole expression
+      c.fillStyle = '#e0985a';
+      c.beginPath();
+      c.moveTo(X(ex - 0.135), Y(0.492));
+      c.quadraticCurveTo(X(ex), Y(0.448), X(ex + 0.135), Y(0.490));
+      c.lineTo(X(ex + 0.135), Y(0.430)); c.lineTo(X(ex - 0.135), Y(0.430));
+      c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(58,32,8,0.92)'; c.lineWidth = 5;
+      c.beginPath();
+      c.moveTo(X(ex - 0.138), Y(0.492));
+      c.quadraticCurveTo(X(ex), Y(0.452), X(ex + 0.138), Y(0.490));
+      c.stroke();
+    }
+    // nose
+    c.fillStyle = '#f0ae63'; c.strokeStyle = OUTL; c.lineWidth = 6;
+    c.beginPath();
+    c.moveTo(X(0.50), Y(0.63)); c.lineTo(X(0.66), Y(0.61));
+    c.lineTo(X(0.60), Y(0.76)); c.lineTo(X(0.44), Y(0.72));
+    c.closePath(); c.fill(); c.stroke();
+    // mouth: small, pursed, unimpressed
+    c.fillStyle = '#8c4a40';
+    c.beginPath(); c.ellipse(X(0.40), Y(0.88), X(0.095), Y(0.026), 0, 0, TAU_); c.fill(); c.stroke();
+    c.strokeStyle = OUTL; c.lineWidth = 4;
+    c.beginPath();
+    c.moveTo(X(0.24), Y(0.845)); c.quadraticCurveTo(X(0.40), Y(0.825), X(0.56), Y(0.865));
+    c.stroke();
+    // jowl crease
+    c.strokeStyle = 'rgba(154,90,36,0.75)'; c.lineWidth = 6;
+    c.beginPath();
+    c.moveTo(X(0.88), Y(0.74)); c.quadraticCurveTo(X(0.68), Y(0.98), X(0.30), Y(0.95));
+    c.stroke();
+  }
+
   function buildBossModel(z) {
     const ZT = G.ZT, BP = ZT.BOSS;
     const t = ZT.get(z.type);
@@ -916,15 +1245,19 @@
     // warm by ~12°, which turns the boss's orange skin GOLD and his navy suit
     // PURPLE — the two things his wardrobe must never be. The Don therefore
     // gets compensation that pushes saturation and level WITHOUT touching hue.
-    const push = (col, s0, l0) => {
+    const push = (col, s0, l0, dh) => {
       const c = new T.Color(col); const hsl = { h: 0, s: 0, l: 0 };
       c.getHSL(hsl);
-      c.setHSL(hsl.h, Math.min(1, hsl.s * s0), Math.max(0.02, hsl.l * l0));
+      c.setHSL((hsl.h + (dh || 0) + 1) % 1, Math.min(1, hsl.s * s0), Math.max(0.02, hsl.l * l0));
       return c.getHex();
     };
     const M0 = c => { const m = toonZ(c); mats.push(m); return m; };          // straight
     const M_ = c => { const m = toonZ(push(c, 1.30, 0.92)); mats.push(m); return m; };   // cloth
-    const MK = c => { const m = toonZ(push(c, 1.45, 0.78)); mats.push(m); return m; };   // skin
+    // the SKIN: hotter than the palette already is — a nudge toward orange
+    // (push never shifted hue before; the Don is the one caller who wants
+    // one) plus a saturation shove and a touch more exposure. The caricature
+    // wants a TAN you can see from the back row.
+    const MK = c => { const m = toonZ(push(c, 1.52, 0.84, -0.022)); mats.push(m); return m; };   // skin
     const MH = c => { const m = toonZ(push(c, 1.75, 0.96)); mats.push(m); return m; };   // hair
 
     const mSuit = M_(BP.suit.base), mSuitD = M_(BP.suit.dark), mSuitL = M_(BP.suit.light);
@@ -1069,64 +1402,16 @@
        the volume it dresses. A plane cannot be swallowed by the body it is
        attached to, and the drawn outline is what makes the shape read at 1x.
        The geometry stays for the silhouette; the plane carries the identity. */
-    const faceTex = canvasTex(256, 288, (c, w, h) => {
-      const X = v => v * w, Y = v => v * h;
-      c.clearRect(0, 0, w, h);
-      c.lineJoin = 'round'; c.lineCap = 'round';
-      const OUTL = '#2a1505';
-      // brow ridge — a soft fold, NOT a black bar: the carved ridge is already
-      // there, and two dark brows stack into a unibrow
-      c.fillStyle = 'rgba(150,95,40,0.55)'; c.strokeStyle = 'rgba(42,21,5,0.55)'; c.lineWidth = 3;
-      c.beginPath();
-      c.moveTo(X(0.10), Y(0.30)); c.lineTo(X(0.92), Y(0.26));
-      c.lineTo(X(0.90), Y(0.20)); c.lineTo(X(0.08), Y(0.235));
-      c.closePath(); c.fill(); c.stroke();
-      for (const [ex, sc] of [[0.31, 1.0], [0.70, 0.94]]) {
-        // eye white, small and wide — a squint, not a saucer
-        c.fillStyle = '#fbf8ee'; c.strokeStyle = OUTL; c.lineWidth = 3;
-        c.beginPath(); c.ellipse(X(ex), Y(0.385), X(0.105) * sc, Y(0.052) * sc, 0, 0, TAU_); c.fill(); c.stroke();
-        // pupil + catchlight
-        c.fillStyle = '#3d2c18';
-        c.beginPath(); c.ellipse(X(ex - 0.024), Y(0.385), X(0.030) * sc, Y(0.032) * sc, 0, 0, TAU_); c.fill();
-        c.fillStyle = '#ffffff';
-        c.beginPath(); c.arc(X(ex + 0.012), Y(0.372), X(0.012), 0, TAU_); c.fill();
-        // the LID: a filled skin-coloured hood that eats the top of the eye,
-        // plus one firm line — the whole expression
-        c.fillStyle = '#e0985a';
-        c.beginPath();
-        c.moveTo(X(ex - 0.125), Y(0.378));
-        c.quadraticCurveTo(X(ex), Y(0.330), X(ex + 0.125), Y(0.376));
-        c.lineTo(X(ex + 0.125), Y(0.318)); c.lineTo(X(ex - 0.125), Y(0.318));
-        c.closePath(); c.fill();
-        c.strokeStyle = 'rgba(58,32,8,0.92)'; c.lineWidth = 5;
-        c.beginPath();
-        c.moveTo(X(ex - 0.128), Y(0.378));
-        c.quadraticCurveTo(X(ex), Y(0.334), X(ex + 0.128), Y(0.376));
-        c.stroke();
-      }
-      // nose
-      c.fillStyle = '#f0ae63'; c.strokeStyle = OUTL; c.lineWidth = 6;
-      c.beginPath();
-      c.moveTo(X(0.50), Y(0.52)); c.lineTo(X(0.66), Y(0.50));
-      c.lineTo(X(0.60), Y(0.66)); c.lineTo(X(0.44), Y(0.62));
-      c.closePath(); c.fill(); c.stroke();
-      // mouth: small, pursed, unimpressed
-      c.fillStyle = '#8c4a40';
-      c.beginPath(); c.ellipse(X(0.40), Y(0.79), X(0.085), Y(0.022), 0, 0, TAU_); c.fill(); c.stroke();
-      c.strokeStyle = OUTL; c.lineWidth = 4;
-      c.beginPath();
-      c.moveTo(X(0.24), Y(0.755)); c.quadraticCurveTo(X(0.40), Y(0.735), X(0.56), Y(0.775));
-      c.stroke();
-      // jowl crease
-      c.strokeStyle = 'rgba(154,90,36,0.75)'; c.lineWidth = 6;
-      c.beginPath();
-      c.moveTo(X(0.86), Y(0.66)); c.quadraticCurveTo(X(0.66), Y(0.94), X(0.30), Y(0.90));
-      c.stroke();
-    });
+    const faceTex = canvasTex(256, 288, (c, w, h) => drawBossFace(c, w, h, 0));
     faceTex.center.set(0.5, 0.5);
     const facePlate = new T.Mesh(new T.PlaneGeometry(PX(52), PX(62)),
       new T.MeshBasicMaterial({ map: faceTex, transparent: true, depthWrite: false }));
-    facePlate.position.set(-PX(33), PX(30), 0);
+    /* PROUD of the jowls. The jowl sphere is PX(31) wide and reaches x=−PX(33),
+       i.e. exactly where this plate used to sit — so the head's own volume ate
+       the face and the Don rendered eyeless. Pushing the plate to −PX(38) puts
+       it in front of every part of the skull and behind the nose (which is at
+       −PX(36)..−PX(44), and is meant to overlap it). */
+    facePlate.position.set(-PX(38), PX(30), 0);
     facePlate.rotation.y = -Math.PI / 2;
     facePlate.castShadow = false;
     head.add(facePlate);
@@ -1156,8 +1441,11 @@
     /* ---------------- the cap (phase 1, final boss / stage 5) ---------------- */
     const cap = new T.Group();
     cap.add(mesh(GEO.hemi, mHat, PX(31), PX(23), PX(32), 0, PX(51), 0));
-    const brim = mesh(GEO.box, mHatD, PX(30), PX(5.2), PX(54), -PX(36), PX(51), 0);
-    brim.rotation.z = 0.20; cap.add(brim);
+    // brim: worn LEVEL, not tilted down — a 0.2 rad droop put the front edge at
+    // PX(41) and, from a camera looking 27° down, the cap OCCLUDED its owner's
+    // eyes entirely (the face read as a bare orange dome).
+    const brim = mesh(GEO.box, mHatD, PX(30), PX(5.2), PX(54), -PX(36), PX(53), 0);
+    brim.rotation.z = 0.06; cap.add(brim);
     cap.add(mesh(GEO.sphere, mHat, PX(3.4), PX(3.4), PX(3.4), 0, PX(74), 0));  // button
     // the lettering, on a plane facing the game camera. The boss is yawed so
     // his -x side faces the lens, so the label (like the face) belongs on -x:
@@ -1258,7 +1546,8 @@
 
     return {
       group: g, mats, torso, head, legL, legR, armL, armR,
-      headProp: null, held: null, rug, cap, isBoss: true,
+      headProp: null, held: null, rug, cap, isBoss: true, faceTex,
+      innerS: S,   // the hit-box normalisation scale — head-anchored FX need it
       hipY, shoY: PX(LY.shoulder), headY: PX(LY.head) - hipY, spec: t,
     };
   }
@@ -1271,7 +1560,13 @@
     const b = t.build, bulk = b.bulk;
     const g = new T.Group();
     const mats = [];
-    const M_ = c => { const m = toonZ(expose(c)); mats.push(m); return m; };
+    /* Three material factories, because a zombie is THREE materials wearing one
+       body: matte cloth, matte-but-warmer skin, and hard metal with a hotter
+       toon ramp. `flat` is unlit and reserved for the small high-value details
+       (eye whites, pupils, teeth) that must never take the scene's colour cast. */
+    const M_ = (c, cls) => { const m = toonZ(expose(c), { cls }); mats.push(m); return m; };
+    const MK_ = c => { const m = toonZ(expose(c), { cls: 'metal' }); mats.push(m); return m; };
+    const MF_ = c => { const m = flat(c); mats.push(m); return m; };
 
     // personal grime tint, same rule as the 2D painter
     const tint = (col, f) => {
@@ -1280,121 +1575,199 @@
       return c.getHex();
     };
     const jf = L.grime;
-    const mSkin = M_(tint(L.skin.base, jf)), mSkinD = M_(tint(L.skin.dark, jf)), mSkinL = M_(tint(L.skin.light, jf));
-    const mCloth = M_(tint(L.suit.base, jf)), mClothD = M_(tint(L.suit.dark, jf));
+    const mSkin = M_(tint(L.skin.base, jf), 'skin'), mSkinD = M_(tint(L.skin.dark, jf), 'skin'),
+          mSkinL = M_(tint(L.skin.light, jf), 'skin');
+    const mCloth = M_(tint(L.suit.base, jf)), mClothD = M_(tint(L.suit.dark, jf)),
+          mClothL = M_(tint(L.suit.light, jf));
     const mPants = M_(tint(L.pants.base, jf)), mPantsD = M_(tint(L.pants.dark, jf));
-    const mShoe = M_('#4a3320'), mDark = M_('#2a2a22'), mBone = M_('#eae6d4');
-    const mEye = M_('#f6f4e8'), mPup = M_('#201c18'), mMouth = M_('#3b1616');
-    const mShirt = M_('#cdc6ab'), mTie = M_('#8d3a34'), mTieS = M_('#d9d3bd');
+    const mShoe = M_('#3f2c1c'), mShoeD = M_('#241811'), mDark = M_('#2a2a22');
+    const mBone = MF_('#ece8d6'), mEye = MF_('#f7f5ee'), mPup = MF_('#221d18'), mGlint = MF_('#ffffff');
+    const mMouth = M_('#3a1414'), mTongue = M_('#7d2f33');
+    const mShirt = M_('#cdc6ab'), mButton = MK_('#d8cfae');
+    const mMetal = MK_('#b6bfc8'), mMetalD = MK_('#7c858e');
+    const mTie = M_('#8d3a34'), mTieS = M_('#d9d3bd');
 
     const hipY = PX(56 * b.legLen);
     const shoY = hipY + PX(32);
     const shoW = PX(21 * b.shoulder * bulk);
     const legW = PX(7.4 * bulk);
+    /* Segment lengths, in sprite px, that ADD UP to the hip height so the sole
+       lands on y=0 with the leg straight: 26 (hip) + 18 (knee) + 12 (ankle). */
+    const THIGH = 26, SHIN = 18, ANKLE = 12;
 
-    /* ---------------- legs (pivot at hip) ---------------- */
+    /* ---------------- legs (hip → knee → ankle chain) ----------------
+       The old leg was ONE rigid group pivoting at the hip, which is why the
+       walk read as a scarecrow and why the sole sawed through the lawn on the
+       stride: nothing could absorb the swing. It is now a three-joint chain,
+       and the ankle carries a real shoe (sole, heel, toe cap, strap) whose
+       bottom sits exactly ANKLE px under the ankle pivot. */
     const mkLeg = (side, back) => {
       const grp = new T.Group();
-      grp.position.set(side * PX(6.5 * bulk), hipY, 0);
+      grp.position.set(side * PX(6.6 * bulk), hipY, 0);
       const mat = back ? mPantsD : mPants;
-      grp.add(mesh(GEO.capsule, mat, legW, PX(13), legW, 0, -PX(13), 0));      // thigh
-      grp.add(mesh(GEO.sphereLo, mat, legW * 0.92, PX(5.6), legW * 0.92, 0, -PX(26), 0)); // knee
-      grp.add(mesh(GEO.capsule, mat, legW * 0.82, PX(9), legW * 0.82, 0, -PX(36), 0));    // shin
-      grp.add(mesh(GEO.box, back ? mDark : mShoe, PX(9), PX(3.4), PX(8), 0, -PX(45), 0)); // cuff
-      grp.add(mesh(GEO.sphere, back ? mDark : mShoe, PX(8), PX(5), PX(12.5), -PX(3), -PX(51), 0)); // shoe
-      return grp;
+      const matShoe = back ? mShoeD : mShoe;
+      grp.add(mesh(GEO.sphere, mat, PX(8.4 * bulk), PX(7.6), PX(7.8), 0, -PX(2), 0));      // hip ball
+      grp.add(mesh(GEO.capsule, mat, legW, PX(14), legW, 0, -PX(13.5), 0));               // thigh
+      const knee = new T.Group(); knee.position.set(0, -PX(THIGH), 0);
+      knee.add(mesh(GEO.sphereLo, mat, PX(6.6 * bulk), PX(6.2), PX(6.4), 0, 0, 0));       // knee cap
+      knee.add(mesh(GEO.capsule, mat, legW * 0.86, PX(9), legW * 0.86, 0, -PX(9), 0));    // shin
+      const cuff = mesh(GEO.torusHi, back ? mPantsD : mPants, PX(7.2), PX(7.2), PX(4.4), 0, -PX(15.5), 0);
+      cuff.rotation.x = Math.PI / 2; knee.add(cuff);                                       // trouser cuff (hides the seam)
+      const foot = new T.Group(); foot.position.set(0, -PX(SHIN), 0);
+      foot.add(mesh(GEO.sphereLo, matShoe, PX(6.4), PX(5.4), PX(6.6), -PX(1), -PX(0.6), 0));      // ankle
+      foot.add(mesh(GEO.box, matShoe, PX(11), PX(6.4), PX(9.4), -PX(2.6), -PX(6.4), 0));          // shoe body
+      foot.add(mesh(GEO.sphere, matShoe, PX(5.4), PX(4.4), PX(7.4), -PX(8), -PX(7.6), 0));        // toe cap
+      /* a real sole: a pale MIDSOLE lip plus a dark outsole under it, wide
+         enough to break the boot's silhouette from the side */
+      foot.add(mesh(GEO.box, mBone, PX(21), PX(2.2), PX(11.6), -PX(3.4), -PX(9.6), 0));           // midsole
+      foot.add(mesh(GEO.box, mShoeD, PX(21.6), PX(3.0), PX(11.2), -PX(3.4), -PX(11.7), 0));       // outsole
+      foot.add(mesh(GEO.box, mShoeD, PX(4.6), PX(5.2), PX(8.4), PX(2.4), -PX(8.4), 0));           // heel block
+      for (const lz of [-PX(2.4), PX(2.4)]) {
+        const lace = mesh(GEO.box, mBone, PX(1.8), PX(2.4), PX(2.6), -PX(5.2), -PX(2.6), lz);
+        lace.rotation.z = 0.18; foot.add(lace);
+      }
+      knee.add(foot);
+      grp.add(knee);
+      return { grp, knee, foot };
     };
-    const legL = mkLeg(1, false), legR = mkLeg(-1, true);
+    const legLc = mkLeg(1, false), legRc = mkLeg(-1, true);
+    const legL = legLc.grp, legR = legRc.grp;
     g.add(legL); g.add(legR);
 
     /* ---------------- torso (pivot at hip) ----------------
-       Jacket silhouette: wide shoulders tapering to a pinched waist, a
-       rounded shoulder cap each side, torn hem, then the open front —
-       shirt V, lapels, tie — so the torso is a costume, not a barrel. */
+       Jacket silhouette: wide shoulders tapering to a pinched waist, a rounded
+       shoulder cap each side, torn hem, then the open front — shirt V, lapels,
+       belt, buttons, pocket flaps and cloth-fold ridges — so the torso is a
+       COSTUME with seams and hardware, not a barrel with a V painted on it. */
     const torso = new T.Group(); torso.position.set(0, hipY, 0);
     torso.add(mesh(GEO.sphere, mPants, PX(14 * bulk), PX(11), PX(12.5), 0, PX(4), 0));         // pelvis
     torso.add(mesh(GEO.taper, mCloth, shoW, PX(31), PX(15.5), 0, PX(20), 0));                  // jacket
     for (const s of [-1, 1]) {
-      torso.add(mesh(GEO.sphere, mCloth, PX(10 * bulk), PX(8.5), PX(9.5), -PX(1), PX(34), s * PX(13 * b.shoulder)));
+      torso.add(mesh(GEO.sphere, mCloth, PX(10.5 * bulk), PX(9), PX(10), -PX(1), PX(33.5), s * PX(12.5 * b.shoulder)));
     }
     torso.add(mesh(GEO.sphere, mClothD, shoW * 0.78, PX(5.5), PX(13.5), 0, PX(5), 0));         // torn hem
+    // cloth-fold ridges: a belt at the waist plus one crease above it — the
+    // cheapest honest read of "this is cloth, not plastic"
+    const belt = mesh(GEO.torusHi, mDark, PX(15.2), PX(15.2), PX(5.6), 0, PX(6.5), 0);
+    belt.rotation.x = Math.PI / 2; torso.add(belt);
+    torso.add(mesh(GEO.box, mButton, PX(2.4), PX(5), PX(6.2), -PX(15.2), PX(6.5), 0));          // buckle
+    const crease = mesh(GEO.torusHi, mClothD, PX(16.4), PX(13.6), PX(2.2), 0, PX(21), 0);
+    crease.rotation.x = Math.PI / 2; torso.add(crease);
     // open jacket front: shirt V + two lapels
     torso.add(mesh(GEO.box, mShirt, PX(3), PX(24), PX(13), -PX(13.5), PX(22), 0));
     for (const s of [-1, 1]) {
       const lap = mesh(GEO.taper, mClothD, PX(4), PX(26), PX(2.6), -PX(14), PX(22), s * PX(6.5));
       lap.rotation.x = s * 0.30; lap.rotation.z = 0.16; torso.add(lap);
     }
+    for (let i = 0; i < 3; i++) torso.add(mesh(GEO.sphereLo, mButton, PX(1.5), PX(1.5), PX(1.5), -PX(12.6), PX(28 - i * 8), PX(4.2)));
+    for (const s of [-1, 1]) torso.add(mesh(GEO.box, mClothD, PX(1.4), PX(6.4), PX(9), -PX(11.4), PX(13), s * PX(9.4)));  // pocket flaps
     // collar roll
     const collar = mesh(GEO.torusHi, mClothD, PX(9.5), PX(9.5), PX(6), 0, PX(34), 0);
     collar.rotation.x = Math.PI / 2; torso.add(collar);
     if (t.props.includes('tie')) ZPROP3D.tie(torso, M_, PX(30));
     if (t.props.includes('pads')) ZPROP3D.pads(torso, M_, PX(32));
 
-    /* ---------------- arms (pivot at shoulder, hang -y) ---------------- */
+    /* ---------------- arms (shoulder → elbow → hand) ----------------
+       Same story as the legs: one rigid tube from the shoulder meant a swing
+       that sheared the elbow through the jacket. The upper arm keeps its
+       sleeve, the cuff closes the joint, and everything below the cuff is
+       bare forearm + a real hand (palm, thumb, three fingers). */
     const mkArm = (side, back) => {
       const grp = new T.Group();
       grp.position.set(-PX(2), PX(31), side * PX(13 * b.shoulder));
       const mat = back ? mClothD : mCloth;
       const matS = back ? mSkinD : mSkin;
-      grp.add(mesh(GEO.sphere, mat, PX(8.5), PX(8), PX(8.5), 0, 0, 0));                      // shoulder
-      grp.add(mesh(GEO.capsule, mat, PX(6.2), PX(10), PX(6.2), 0, -PX(13), 0));              // upper arm
-      grp.add(mesh(GEO.sphereLo, mat, PX(6), PX(5.4), PX(6), 0, -PX(23), 0));                // elbow
-      grp.add(mesh(GEO.capsule, matS, PX(5.2), PX(9), PX(5.2), 0, -PX(32), 0));              // forearm
-      grp.add(mesh(GEO.sphere, matS, PX(6.6), PX(5.2), PX(7.6), 0, -PX(42), 0));             // mitt
-      // fingers: boxes, not capsules — 36 tris instead of 300 each, and at
-      // this size nobody can tell the difference
+      grp.add(mesh(GEO.sphere, mat, PX(9.4), PX(8.4), PX(9.2), 0, 0, 0));                   // shoulder cap
+      grp.add(mesh(GEO.capsule, mat, PX(6.6), PX(10), PX(6.6), 0, -PX(13), 0));             // upper arm (sleeve)
+      const cuff = mesh(GEO.torusHi, back ? mClothD : mCloth, PX(7.4), PX(7.4), PX(4.6), 0, -PX(20.5), 0);
+      cuff.rotation.x = Math.PI / 2; grp.add(cuff);                                          // sleeve cuff closes the elbow
+      const elbow = new T.Group(); elbow.position.set(0, -PX(24), 0);
+      elbow.add(mesh(GEO.sphereLo, matS, PX(6.2), PX(6.0), PX(6.2), 0, 0, 0));              // elbow
+      elbow.add(mesh(GEO.capsule, matS, PX(5.8), PX(8), PX(5.8), 0, -PX(8), 0));            // forearm
+      const hand = new T.Group(); hand.position.set(0, -PX(18), 0);
+      hand.add(mesh(GEO.torusHi, matS, PX(5.4), PX(5.4), PX(3), 0, PX(3.4), 0));            // wrist break
+      hand.add(mesh(GEO.sphere, matS, PX(6.6), PX(5.8), PX(7.8), -PX(1), -PX(2), 0));      // palm
+      const th = mesh(GEO.capsule, matS, PX(2.6), PX(3.6), PX(2.6), -PX(5), -PX(5.4), side * PX(5));
+      th.rotation.z = -0.55; th.rotation.x = side * 0.6; hand.add(th);                       // thumb
       for (let i = 0; i < 3; i++) {
-        grp.add(mesh(GEO.box, matS, PX(3.4), PX(7.4), PX(3.8), -PX(1), -PX(49), (i - 1) * PX(4.2)));
+        const f = mesh(GEO.capsule, matS, PX(2.7), PX(6), PX(2.7), -PX(4.2), -PX(8.2), (i - 1) * PX(4.1));
+        f.rotation.z = -0.24 - i * 0.05; hand.add(f);
       }
-      return grp;
+      elbow.add(hand);
+      grp.add(elbow);
+      return { grp, elbow, hand };
     };
-    const armL = mkArm(1, false), armR = mkArm(-1, true);
+    const armLc = mkArm(1, false), armRc = mkArm(-1, true);
+    const armL = armLc.grp, armR = armRc.grp;
     torso.add(armL); torso.add(armR);
 
     /* ---------------- head (pivot at neck) ----------------
-       Head-local origin = top of the neck; the cranium is centred at
-       +PX(15) and the figure tops out near PX(135), so the head is
-       about a third of the zombie — the PopCap read. Face features are
-       pushed out along -x and deliberately proud of the skull so they
-       survive the 3/4 camera instead of sinking into the mesh. */
+       Head-local origin = top of the neck; the cranium is centred at +PX(15)
+       and the crown still lands at ~PX(31), which is the envelope every HEAD
+       PROP is authored against — so the cone, bucket and helmet keep fitting.
+       What changed is the modelling UNDER the props: cheekbones, sunken eye
+       sockets with a flat unlit sclera and a glint, heavy lids, eyebags, a
+       nostril-punched nose, an outer+inner ear, and a grin with a tongue and
+       a real tooth row. */
     const head = new T.Group(); head.position.set(0, PX(42), 0);
     const sk = b.headScale;
-    head.add(mesh(GEO.cylHi, mSkinD, PX(6), PX(12), PX(6), 0, -PX(5), 0));                  // neck
-    /* Skull: the cranium is only the top ~55% — the jaw and muzzle own the
-       rest — so the face gets real estate instead of being cramped under a
-       giant empty dome. Local crown lands at ~PX(31). */
+    head.add(mesh(GEO.cylHi, mSkinD, PX(6.4), PX(13), PX(6.4), 0, -PX(5), 0));                  // neck
     head.add(mesh(GEO.sphereHi, mSkin, PX(17 * sk), PX(16 * sk), PX(16.5 * sk), PX(1 * sk), PX(15 * sk), 0)); // cranium
-    head.add(mesh(GEO.sphere, mSkin, PX(15 * sk), PX(13 * sk), PX(14.5 * sk), PX(4 * sk), PX(12 * sk), 0)); // occiput
+    head.add(mesh(GEO.sphere, mSkinD, PX(15.4 * sk), PX(12 * sk), PX(15 * sk), PX(3.5 * sk), PX(12 * sk), 0)); // occiput shadE
     head.add(mesh(GEO.sphere, mSkin, PX(12 * sk), PX(8.5 * sk), PX(13.5 * sk), -PX(5 * sk), PX(4 * sk), 0));  // muzzle
     head.add(mesh(GEO.sphere, mSkin, PX(14 * sk), PX(10 * sk), PX(14 * sk), -PX(6 * sk), -PX(3 * sk), 0));    // jaw
     head.add(mesh(GEO.sphere, mSkinD, PX(8 * sk), PX(3.2 * sk), PX(9 * sk), -PX(10 * sk), -PX(11 * sk), 0));  // chin
     head.add(mesh(GEO.sphere, mSkinD, PX(14 * sk), PX(3.6 * sk), PX(16 * sk), PX(2 * sk), PX(20 * sk), 0));   // brow ridge
-    head.add(mesh(GEO.sphere, mSkin, PX(5 * sk), PX(4.2 * sk), PX(5 * sk), -PX(17 * sk), PX(1 * sk), 0));     // nose
-    // grin: dark cavity + a row of teeth over the lip
-    head.add(mesh(GEO.sphereLo, mMouth, PX(8 * sk), PX(4.6 * sk), PX(10 * sk), -PX(13 * sk), -PX(4 * sk), 0));
-    for (let i = 0; i < 4; i++) {
-      head.add(mesh(GEO.box, mBone, PX(3.2), PX(3.6), PX(3.2), -PX(16 * sk), -PX(6.4 * sk), (i - 1.5) * PX(4.2)));
-    }
-    head.add(mesh(GEO.box, mBone, PX(3), PX(3), PX(3), -PX(16 * sk), -PX(0.6 * sk), -PX(2)));
-    /* eyes: huge and bulging well proud of the skull. From this near
-       side-on camera a flush eye disappears, so they sit forward of the
-       muzzle and carry a fat dark pupil on their front face. */
     for (const s of [-1, 1]) {
+      head.add(mesh(GEO.sphere, mSkin, PX(5.8 * sk), PX(5 * sk), PX(6 * sk), -PX(11 * sk), PX(2.5 * sk), s * PX(9 * sk)));   // cheekbone
+      head.add(mesh(GEO.sphere, mSkinD, PX(6 * sk), PX(3 * sk), PX(5.4 * sk), -PX(13 * sk), PX(2.6 * sk), s * PX(7.4 * sk))); // eyebag
       head.add(mesh(GEO.sphereLo, mSkin, PX(4.6 * sk), PX(5.4 * sk), PX(3.6 * sk), PX(2 * sk), PX(10 * sk), s * PX(16 * sk))); // ear
-      head.add(mesh(GEO.sphereHi, mEye, PX(9 * sk), PX(9.6 * sk), PX(9.2 * sk), -PX(10.5 * sk), PX(9 * sk), s * PX(7 * sk)));
-      head.add(mesh(GEO.sphereLo, mPup, PX(3.4 * sk), PX(3.6 * sk), PX(3.4 * sk), -PX(18.4 * sk), PX(8.2 * sk), s * PX(7.8 * sk)));
+      head.add(mesh(GEO.sphereLo, mSkinD, PX(2.6 * sk), PX(3.4 * sk), PX(1.6 * sk), PX(2 * sk), PX(10 * sk), s * PX(17.2 * sk))); // ear canal
     }
-    // hair tufts on the crown
-    for (let i = 0; i < 4; i++) {
-      const tuft = mesh(GEO.coneHi, mDark, PX(2.4), PX(9 + i), PX(2.4),
-        PX(3) - PX(i * 2), PX(29 * sk), (i - 1.5) * PX(6.5));
-      tuft.rotation.z = (i % 2 ? 0.3 : -0.2) + (i * 0.08);
-      head.add(tuft);
+    head.add(mesh(GEO.sphere, mSkin, PX(5.2 * sk), PX(4.4 * sk), PX(5.2 * sk), -PX(17 * sk), PX(1 * sk), 0));  // nose
+    for (const s of [-1, 1]) head.add(mesh(GEO.sphereLo, mSkinD, PX(1.1 * sk), PX(1 * sk), PX(1.1 * sk), -PX(21.2 * sk), -PX(0.9 * sk), s * PX(1.6 * sk))); // nostril
+    // grin: dark cavity + tongue + a real tooth row over the lip
+    head.add(mesh(GEO.sphereLo, mMouth, PX(9.8 * sk), PX(6.2 * sk), PX(12.4 * sk), -PX(12 * sk), -PX(4.6 * sk), 0));
+    head.add(mesh(GEO.sphere, mTongue, PX(5 * sk), PX(2 * sk), PX(7 * sk), -PX(14.4 * sk), -PX(7.4 * sk), 0));
+    for (let i = 0; i < 6; i++) {
+      head.add(mesh(GEO.box, mBone, PX(3 * sk), PX(3.8 * sk), PX(3.2 * sk), -PX(15.8 * sk), -PX(7.4 * sk), (i - 2.5) * PX(3.7 * sk)));
     }
+    head.add(mesh(GEO.box, mBone, PX(2.8 * sk), PX(2.8 * sk), PX(2.8 * sk), -PX(15.8 * sk), -PX(1.2 * sk), -PX(2.6 * sk)));
+    head.add(mesh(GEO.box, mBone, PX(2.8 * sk), PX(2.8 * sk), PX(2.8 * sk), -PX(15.8 * sk), -PX(1.2 * sk), PX(2.6 * sk)));
+    /* eyes: a dark SOCKET, an unlit sclera standing proud of it, a flat pupil
+       and a specular glint. PvZ eyes are ENORMOUS — a small eye on a big
+       cranium is the single fastest way to make a stylised character read as
+       generic. From this near side-on camera a flush eye also disappears, so
+       the whole assembly sits forward of the muzzle. */
+    for (const s of [-1, 1]) {
+      head.add(mesh(GEO.sphereLo, mSkinD, PX(7.4 * sk), PX(7.6 * sk), PX(6.6 * sk), -PX(11.4 * sk), PX(9.4 * sk), s * PX(7.2 * sk)));  // socket
+      head.add(mesh(GEO.sphereHi, mEye, PX(7.8 * sk), PX(8.4 * sk), PX(7.8 * sk), -PX(14.6 * sk), PX(9.6 * sk), s * PX(7.6 * sk)));    // sclera
+      /* pupils are pushed in BOTH directions — wider, and further out than the
+         sclera's own surface, or they vanish into the eye at gameplay scale */
+      head.add(mesh(GEO.sphereLo, mPup, PX(4.3 * sk), PX(4.6 * sk), PX(4.4 * sk), -PX(21.2 * sk), PX(9.2 * sk), s * PX(8 * sk)));     // pupil
+      head.add(mesh(GEO.sphereLo, mGlint, PX(1.5 * sk), PX(1.6 * sk), PX(1.5 * sk), -PX(22.6 * sk), PX(12 * sk), s * PX(6.6 * sk)));  // glint
+      const lid = mesh(GEO.sphere, mSkin, PX(6.6 * sk), PX(3.4 * sk), PX(7 * sk), -PX(13 * sk), PX(15.2 * sk), s * PX(7.6 * sk));
+      lid.rotation.z = -0.30; head.add(lid);                                                     // heavy lid
+      head.add(mesh(GEO.sphereLo, mSkinD, PX(2.6 * sk), PX(1.6 * sk), PX(2.4 * sk), -PX(15 * sk), PX(3.4 * sk), s * PX(11.4 * sk))); // cheek rot
+    }
+    // hair: overlapping SWEPT-BACK CLUMPS, not spikes. Five thin cones floating
+    // on the crown read as triangles stuck to a ball; a mop of nine flattened
+    // lumps that overlap each other and the skull reads as hair.
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2;
+      const rr = PX(6.5) + PX(1.2) * ((i * 5) % 3);
+      const clump = mesh(GEO.sphereLo, i % 3 ? mDark : mSkinD,
+        rr * 1.5, rr * 1.15, rr * 1.35,
+        PX(4) + Math.cos(a) * PX(7), PX(27 + (i % 3) * 1.6), Math.sin(a) * PX(6.5));
+      clump.rotation.z = 0.30 + (i % 3) * 0.14;   // swept backwards
+      clump.rotation.x = Math.sin(a) * 0.5;
+      head.add(clump);
+    }
+    head.add(mesh(GEO.sphereLo, mDark, PX(11), PX(6), PX(11), PX(6), PX(30.5 * sk), 0));   // crown mass
     // head armour / headwear
     let headProp = null;
     for (const pid of t.props) {
-      if (HEAD_PROP_IDS[pid]) headProp = ZPROP3D[pid](head, M_);
+      if (HEAD_PROP_IDS[pid]) headProp = ZPROP3D[pid](head, M_, MK_);
     }
     torso.add(head);
     // head carries a global size bump (and takes its headwear with it)
@@ -1403,7 +1776,7 @@
     /* ---------------- held props ---------------- */
     let held = null;
     for (const pid of ['screen', 'paper', 'pole', 'pick', 'flag']) {
-      if (t.props.includes(pid)) held = ZPROP3D[pid](g, M_);
+      if (t.props.includes(pid)) held = ZPROP3D[pid](g, M_, MK_);
     }
     // The held-prop builders only RETURN their group — unlike the head props
     // they never g.add() it themselves, so without this line the door (and
@@ -1413,11 +1786,28 @@
 
     g.add(torso);
     g.scale.setScalar(t.scale * 1.07);
-    g.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
+    /* Shadow culling. The detailed build has ~118 meshes per zombie, and every
+       casting mesh costs a second draw call in the shadow pass as well as one
+       in the main pass — 9 zombies went from ~600 to ~1600 calls a frame.
+       Anything smaller than PX(6) (teeth, pupils, buttons, hair clumps, finger
+       tips) contributes nothing at shadow-map resolution, so it stops casting. */
+    g.traverse(o => {
+      if (!o.isMesh) return;
+      const gm = o.geometry;
+      if (!gm.boundingSphere) gm.computeBoundingSphere();
+      const sc = Math.max(Math.abs(o.scale.x), Math.abs(o.scale.y), Math.abs(o.scale.z));
+      o.castShadow = gm.boundingSphere.radius * sc > PX(6);
+    });
     g.traverse(o => { if (o.userData && o.userData.noShadow) o.castShadow = false; });
 
     return {
       group: g, mats, torso, head, legL, legR, armL, armR,
+      kneeL: legLc.knee, kneeR: legRc.knee, footL: legLc.foot, footR: legRc.foot,
+      elbowL: armLc.elbow, elbowR: armRc.elbow, handL: armLc.hand, handR: armRc.hand,
+      // WORLD-unit segment lengths: plant() compares these against hipY, so
+      // they must carry the same px→wu conversion or the body is launched 50
+      // world units into the sky (the first build did exactly that)
+      thigh: PX(THIGH), shin: PX(SHIN), ankle: PX(ANKLE),
       headProp, held, baseSkin: L.skin,
       hipY, shoY, spec: t,
     };
@@ -1432,52 +1822,110 @@
   function buildPultModel() {
     const g = new T.Group();
     const mats = [];
-    const M_ = (c) => { const m = toon(c); mats.push(m); return m; };
-    const mPot = M_(0xb85c2e), mPotD = M_(0x94461e), mWood = M_(0x8a6a3c), mWoodD = M_(0x6e522e);
-    const mGreen = M_(0x3e8c38), mLeaf = M_(0x4aa440);
+    const M_ = (c, cls) => { const m = toon(c, { cls }); mats.push(m); return m; };
+    const MK_ = c => M_(c, 'metal');
+    const mPot = M_(0xb85c2e), mPotD = M_(0x94461e), mPotL = M_(0xd2763c);
+    const mWood = M_(0x8a6a3c), mWoodD = M_(0x6e522e), mWoodL = M_(0xa07c48);
+    const mGreen = M_(0x3e8c38), mLeaf = M_(0x4aa440), mLeafD = M_(0x2f6f2c);
+    const mSoil = M_(0x50391f), mSoilD = M_(0x3b2a15);
+    const mIron = MK_(0x6b7480), mIronD = MK_(0x4b525c), mBolt = MK_(0xa8b0b8);
+    const mRope = M_(0xc9a860);
 
-    // pot — squashed urn, reads from the high camera; face toward +z (camera)
+    /* ---- base: a timber skid with iron brackets. The old pult sat on nothing,
+       which is why it read as a floating urn rather than a machine. ---- */
+    for (const s of [-1, 1]) {
+      g.add(mesh(GEO.box, mWoodD, PX(54), PX(6), PX(7), 0, PX(3), s * PX(17)));
+      for (let i = -1; i <= 1; i++) {
+        g.add(mesh(GEO.cyl, mBolt, PX(1.6), PX(2.4), PX(1.6), i * PX(16), PX(6.6), s * PX(17)));
+      }
+    }
+    g.add(mesh(GEO.box, mWood, PX(10), PX(5), PX(38), -PX(20), PX(6.5), 0));      // cross brace
+    g.add(mesh(GEO.box, mWood, PX(10), PX(5), PX(38), PX(20), PX(6.5), 0));
+    for (const s of [-1, 1]) g.add(mesh(GEO.box, mIron, PX(3), PX(9), PX(9), -PX(20), PX(6.5), s * PX(15)));  // corner straps
+
+    /* ---- pot: urn with a rim lip and a foot ring ---- */
     const pot = mesh(GEO.sphere, mPot, PX(40), PX(30), PX(34), 0, PX(26), 0);
     g.add(pot);
-    g.add(mesh(GEO.cyl, mPotD, PX(26), PX(10), PX(26), 0, PX(5), 0));
-    // soil + rim on top
-    g.add(mesh(GEO.cyl, M_(0x5a4028), PX(30), PX(6), PX(27), 0, PX(48), 0));
-    // vine leaves hugging the urn shoulders
-    for (const [a, s] of [[0.5, 1.15], [2.4, 1.25], [4.1, 1.0]]) {
-      const leaf = mesh(GEO.sphere, mLeaf, PX(13) * s, PX(4.5), PX(9) * s, Math.cos(a) * PX(34), PX(42), Math.sin(a) * PX(28) * 0.8 + PX(6));
+    g.add(mesh(GEO.cyl, mPotD, PX(26), PX(10), PX(26), 0, PX(5), 0));            // foot
+    g.add(mesh(GEO.cyl, mPot, PX(30), PX(4), PX(29), 0, PX(2), 0));              // foot flange
+    const rim = mesh(GEO.torusHi, mPotL, PX(33), PX(31), PX(9), 0, PX(47), 0);   // rim lip
+    rim.rotation.x = Math.PI / 2; g.add(rim);
+    // terracotta highlight band + a fired crack
+    const band = mesh(GEO.torusHi, mPotL, PX(37), PX(33), PX(3), 0, PX(24), 0);
+    band.rotation.x = Math.PI / 2; g.add(band);
+    const crack = mesh(GEO.box, mPotD, PX(1.4), PX(16), PX(1.2), PX(33), PX(22), PX(6));
+    crack.rotation.z = 0.35; g.add(crack);
+
+    /* ---- soil: mulch surface, clods and a couple of pebbles ---- */
+    g.add(mesh(GEO.cyl, mSoil, PX(30), PX(6), PX(27), 0, PX(48), 0));
+    for (let i = 0; i < 7; i++) {
+      const a = i * 0.9, r = PX(9 + (i % 3) * 5);
+      g.add(mesh(GEO.sphereLo, i % 2 ? mSoilD : mSoil, PX(4 + (i % 3)), PX(2.2), PX(4 + (i % 2)),
+        Math.cos(a) * r, PX(50), Math.sin(a) * r * 0.85));
+    }
+
+    /* ---- vine leaves hugging the urn shoulders (two greens, two sizes) ---- */
+    for (const [a, s, mat] of [[0.5, 1.15, mLeaf], [2.4, 1.25, mLeafD], [4.1, 1.0, mLeaf], [5.5, 0.85, mLeafD], [1.5, 0.7, mLeafD]]) {
+      const leaf = mesh(GEO.sphere, mat, PX(13) * s, PX(4.5), PX(9) * s, Math.cos(a) * PX(34), PX(42), Math.sin(a) * PX(28) * 0.8 + PX(6));
       leaf.rotation.y = -a;
       g.add(leaf);
     }
-    // BIG face on +z side (toward the camera) — must read at gameplay scale
-    const mEye = M_(0xf8f5ea), mPup = M_(0x14140e), mBrow = M_(0x2e5a28);
-    g.add(mesh(GEO.sphere, mEye, PX(8), PX(9.5), PX(6), PX(14), PX(30), PX(30)));
-    g.add(mesh(GEO.sphere, mEye, PX(8), PX(9.5), PX(6), -PX(14), PX(30), PX(30)));
-    g.add(mesh(GEO.sphere, mPup, PX(3.4), PX(3.8), PX(2.6), PX(14), PX(30), PX(34.5)));
-    g.add(mesh(GEO.sphere, mPup, PX(3.4), PX(3.8), PX(2.6), -PX(14), PX(30), PX(34.5)));
-    // brows — determined angle
-    g.add(mesh(GEO.box, mBrow, PX(13), PX(3), PX(3.4), PX(14), PX(39), PX(32)));
-    g.add(mesh(GEO.box, mBrow, PX(13), PX(3), PX(3.4), -PX(14), PX(39), PX(32)));
-    // mouth — grit
-    g.add(mesh(GEO.box, M_(0x54301a), PX(16), PX(4), PX(3), 0, PX(15), PX(33)));
-    // leafy hair tuft
-    g.add(mesh(GEO.sphere, mLeaf, PX(11), PX(5.5), PX(7), PX(6), PX(52), PX(4)));
+    // tendril curl
+    for (let i = 0; i < 4; i++) {
+      g.add(mesh(GEO.sphereLo, mLeafD, PX(2.2), PX(2.2), PX(2.2), PX(28) + PX(i * 2.4), PX(54) + PX(i * 2.6), PX(16) + PX(i * 1.6)));
+    }
 
-    // yoke + axle
+    /* ---- face on +z (the player's side). Bigger and glossier than the old
+       build: the melon-pult is the character the player stares at all game, so
+       it gets a glint on each eye, an underbite and a highlight on the brow. */
+    const mEye = M_(0xf8f5ea), mGlint = M_(0xffffff), mPup = M_(0x14140e);
+    const mBrow = M_(0x2e5a28), mTooth = M_(0xf0ece0), mMouth = M_(0x54301a);
+    for (const s of [-1, 1]) {
+      g.add(mesh(GEO.sphere, mEye, PX(9), PX(10.5), PX(6.4), s * PX(14), PX(30), PX(30)));
+      g.add(mesh(GEO.sphere, mPup, PX(3.8), PX(4.2), PX(2.8), s * PX(14), PX(29.6), PX(35)));
+      g.add(mesh(GEO.sphereLo, mGlint, PX(1.3), PX(1.4), PX(1), s * PX(16.4), PX(33), PX(35.4)));
+      const brow = mesh(GEO.box, mBrow, PX(14), PX(3.2), PX(3.6), s * PX(14), PX(39.5), PX(32));
+      brow.rotation.z = s * 0.20; g.add(brow);          // determined
+    }
+    g.add(mesh(GEO.box, mMouth, PX(17), PX(4.6), PX(3.2), 0, PX(15), PX(33)));    // gritted mouth
+    g.add(mesh(GEO.box, mTooth, PX(3), PX(2.6), PX(2.4), -PX(4), PX(16.6), PX(33.6)));
+    g.add(mesh(GEO.box, mTooth, PX(3), PX(2.6), PX(2.4), PX(4), PX(16.6), PX(33.6)));
+    g.add(mesh(GEO.sphere, mLeaf, PX(11), PX(5.5), PX(7), PX(6), PX(52), PX(4)));  // hair tuft
+
+    /* ---- yoke + axle ---- */
     g.add(mesh(GEO.box, mWoodD, PX(6), PX(42), PX(4), -PX(8), PX(62), PX(13)));
     g.add(mesh(GEO.box, mWoodD, PX(6), PX(42), PX(4), -PX(8), PX(62), -PX(13)));
+    g.add(mesh(GEO.box, mWood, PX(4), PX(10), PX(30), -PX(8), PX(58), 0));       // yoke cross-tie
+    for (const s of [-1, 1]) g.add(mesh(GEO.cyl, mBolt, PX(1.5), PX(3), PX(1.5), -PX(8), PX(52), s * PX(13)));
     g.add(mesh(GEO.cyl, mWood, PX(3), PX(30), PX(3), -PX(8), PX(80), 0));
+    g.add(mesh(GEO.cyl, mIron, PX(3.6), PX(3), PX(3.6), -PX(8), PX(80), PX(15))); // axle bearing
+    g.add(mesh(GEO.cyl, mIron, PX(3.6), PX(3), PX(3.6), -PX(8), PX(80), -PX(15)));
     R3._pultAxle = new T.Vector3(-PX(8), PX(80), 0);
 
-    // throwing arm (pivot at axle, points +x)
+    /* ---- throwing arm: tapered beam, iron bands, rope lashing, scoop ---- */
     const arm = new T.Group();
     arm.position.copy(R3._pultAxle);
-    arm.add(mesh(GEO.box, mWood, PX(66), PX(6.5), PX(6.5), PX(29), 0, 0));
-    // scoop basket at tip
+    const beam = mesh(GEO.taper, mWood, PX(4.6), PX(66), PX(4.6), PX(29), 0, 0);
+    beam.rotation.z = Math.PI / 2; arm.add(beam);    // tapered beam, thick at the hub
+    for (const dx of [PX(14), PX(30), PX(46)]) {
+      const band = mesh(GEO.torusHi, mIron, PX(5.2), PX(5.2), PX(3), dx, 0, 0);
+      band.rotation.y = Math.PI / 2; arm.add(band);
+    }
+    const pivot = mesh(GEO.cyl, mIronD, PX(7), PX(17), PX(7), 0, 0, 0);
+    pivot.rotation.x = Math.PI / 2; arm.add(pivot);                             // pivot hub
+    // scoop: boarded basket with a rope lashing and a leather lip
     arm.add(mesh(GEO.box, mWoodD, PX(15), PX(3.4), PX(19), PX(60), -PX(2.5), 0));
     arm.add(mesh(GEO.box, mWoodD, PX(2.6), PX(7), PX(19), PX(66.5), 0, 0));
     arm.add(mesh(GEO.box, mWoodD, PX(2.6), PX(7), PX(19), PX(53.5), 0, 0));
-    // counterweight
-    arm.add(mesh(GEO.box, M_(0x4c4c54), PX(12), PX(11), PX(11), -PX(11), -PX(5), 0));
+    arm.add(mesh(GEO.box, mWoodL, PX(13), PX(1.6), PX(17), PX(60), PX(1.2), 0));  // scoop lip
+    for (const s of [-1, 1]) {
+      const rope = mesh(GEO.torusHi, mRope, PX(9.5), PX(8), PX(2), PX(60), -PX(4), s * PX(17));
+      rope.rotation.y = Math.PI / 2; arm.add(rope);
+    }
+    // stone counterweight, lashed
+    arm.add(mesh(GEO.iron, mIron, PX(12), PX(11), PX(11), -PX(12), -PX(5), 0));
+    const lash = mesh(GEO.torusHi, mRope, PX(6.5), PX(6), PX(2.2), -PX(12), -PX(5), 0);
+    lash.rotation.y = Math.PI / 2; arm.add(lash);
     g.add(arm);
 
     // held melon in scoop
@@ -1548,15 +1996,16 @@
      In 3D a limb hangs along -y, so a POSITIVE z-rotation swings it
      toward +x (backwards — zombies face -x). Forward arm reach is
      therefore negative; hips are symmetric so the sign only picks
-     which leg leads. */
+     which leg leads. `knee` is the airborne bend, straight from the
+     2D table so both renderers stride at the same amplitude. */
   const GAIT3D = {
-    shamble: { step: 0.55, bob: 1.6, sway: 0.050, arm: 0.55, base: -0.92, baseB: -1.30, jaw: 1.0 },
-    plod: { step: 0.40, bob: 2.2, sway: 0.035, arm: 0.34, base: -1.00, baseB: -1.42, jaw: 0.7 },
-    lurch: { step: 0.34, bob: 1.0, sway: 0.020, arm: 0.06, base: -1.10, baseB: -1.44, jaw: 0.5 },
-    trudge: { step: 0.42, bob: 1.6, sway: 0.030, arm: 0.10, base: -1.26, baseB: -0.86, jaw: 0.4 },
-    trot: { step: 0.72, bob: 2.4, sway: 0.045, arm: 0.85, base: -0.70, baseB: -1.16, jaw: 1.3 },
-    stomp: { step: 0.62, bob: 2.8, sway: 0.060, arm: 0.45, base: -0.80, baseB: -1.30, jaw: 0.8 },
-    march: { step: 0.60, bob: 2.0, sway: 0.038, arm: 0.50, base: -0.78, baseB: -1.34, jaw: 0.9 },
+    shamble: { step: 0.55, bob: 1.6, sway: 0.050, arm: 0.55, base: -0.92, baseB: -1.30, jaw: 1.0, knee: 0.55 },
+    plod: { step: 0.40, bob: 2.2, sway: 0.035, arm: 0.34, base: -1.00, baseB: -1.42, jaw: 0.7, knee: 0.40 },
+    lurch: { step: 0.34, bob: 1.0, sway: 0.020, arm: 0.06, base: -1.10, baseB: -1.44, jaw: 0.5, knee: 0.30 },
+    trudge: { step: 0.42, bob: 1.6, sway: 0.030, arm: 0.10, base: -1.26, baseB: -0.86, jaw: 0.4, knee: 0.45 },
+    trot: { step: 0.72, bob: 2.4, sway: 0.045, arm: 0.85, base: -0.70, baseB: -1.16, jaw: 1.3, knee: 0.95 },
+    stomp: { step: 0.62, bob: 2.8, sway: 0.060, arm: 0.45, base: -0.80, baseB: -1.30, jaw: 0.8, knee: 1.05 },
+    march: { step: 0.60, bob: 2.0, sway: 0.038, arm: 0.50, base: -0.78, baseB: -1.34, jaw: 0.9, knee: 0.72 },
   };
   /* the pelvis slides back as the head leads forward, pivoting at mid-torso;
      a pure hip pivot would just tilt the whole body like a plank */
@@ -1588,9 +2037,31 @@
     head.rotation.set(0, 0, 0);
     legL.rotation.set(0, 0, 0); legR.rotation.set(0, 0, 0);
     armL.rotation.set(0, 0, 0); armR.rotation.set(0, 0, 0);
+    if (model.kneeL) {
+      model.kneeL.rotation.set(0, 0, 0); model.kneeR.rotation.set(0, 0, 0);
+      model.footL.rotation.set(0, 0, 0); model.footR.rotation.set(0, 0, 0);
+      model.elbowL.rotation.set(0, 0, 0); model.elbowR.rotation.set(0, 0, 0);
+      model.handL.rotation.set(0, 0, 0); model.handR.rotation.set(0, 0, 0);
+    }
     group.rotation.set(0, YAW, 0);
     group.position.y = 0;
     let opacity = 1;
+
+    /* FEET ON THE LAWN — sagittal forward kinematics.
+       The old rig swung the whole leg from the hip with no knee or ankle, so a
+       stride drove the shoe through the grass and every shorter pose (kneel,
+       idle) left the model floating in the air. Both legs are now solved in
+       the z-plane and the body is dropped by however much the STRAIGHTEST leg
+       over- or under-reaches, which plants the lowest sole at y=0 on every
+       frame of every cycle. Bosses keep their hand-authored leg rig. */
+    const plant = (extra) => {
+      if (!model.kneeL) return (extra || 0);
+      const drop = (hip, kn, fo) =>
+        model.thigh * Math.cos(hip) + model.shin * Math.cos(hip + kn) + model.ankle * Math.cos(hip + kn + fo);
+      const dL = drop(legL.rotation.z, model.kneeL.rotation.z, model.footL.rotation.z);
+      const dR = drop(legR.rotation.z, model.kneeR.rotation.z, model.footR.rotation.z);
+      return (Math.max(dL, dR) - model.hipY) + (extra || 0);
+    };
 
     // headwear follows the helmet flag; held gear follows the front-armour flag
     if (headProp) {
@@ -1644,8 +2115,15 @@
       torso.scale.set(1 + br, 1 + br * 0.6, 1 + br);
       torso.rotation.z = hunch + Math.sin(time * 1.1 + s) * 0.025;
       torso.position.x = hipSetback;
+      torso.rotation.y = Math.sin(time * 0.6 + s) * 0.06;
       armL.rotation.z = gg.base + Math.sin(time * 1.3 + s) * 0.09;
       armR.rotation.z = (gg.baseB || gg.base) + Math.sin(time * 1.3 + s + 1) * 0.08;
+      armL.rotation.x = -0.19 - Math.sin(time * 1.1 + s) * 0.02;
+      armR.rotation.x = 0.19 + Math.sin(time * 1.1 + s + 1) * 0.02;
+      if (model.elbowL) {
+        model.elbowL.rotation.z = -0.30 - Math.sin(time * 1.3 + s) * 0.06;
+        model.elbowR.rotation.z = -0.26 - Math.sin(time * 1.3 + s + 1) * 0.06;
+      }
       head.rotation.z = Math.sin(time * 0.9 + s) * 0.05;
       // headY comes from the model: the walker's head is authored at PX(42) so
       // this used to be a no-op for him — but it silently yanked the BOSS's
@@ -1653,8 +2131,14 @@
       head.position.y = (model.headY === undefined ? PX(42) : model.headY)
         + Math.sin(time * 2.2 + s) * PX(0.8);
       head.rotation.x = Math.sin(time * 1.5 + s * 2) * 0.06;
-      legL.rotation.z = -0.10; legR.rotation.z = 0.13;
-      group.position.y = idle * PX(1.2);
+      head.rotation.y = Math.sin(time * 0.7 + s * 1.3) * 0.10;
+      legL.rotation.z = -0.08; legR.rotation.z = 0.10;
+      if (model.kneeL) {
+        const wsh = Math.sin(time * 1.1 + s);
+        model.kneeL.rotation.z = 0.10 + 0.03 * wsh; model.kneeR.rotation.z = 0.14 - 0.03 * wsh;
+        model.footL.rotation.z = -0.04 * wsh; model.footR.rotation.z = 0.05 * wsh;
+        group.position.y = plant(Math.abs(Math.sin(time * 2.2 + s)) * PX(0.9));
+      } else group.position.y = idle * PX(1.2);
       // ---- the boss's idle bits: accordion hands, the YMCA (game.js rolls
       // the schedule; this only poses). A hit clears idleKind and the
       // standard hold pose flows straight back.
@@ -1671,6 +2155,7 @@
         const pump = Math.sin(z.idleT * 8.5);
         armL.rotation.z = -1.14 + pump * 0.24; armL.rotation.x = -0.42;
         armR.rotation.z = -1.2 - pump * 0.24; armR.rotation.x = -0.42;
+        if (model.elbowL) { model.elbowL.rotation.z = -0.85 - pump * 0.35; model.elbowR.rotation.z = -0.85 + pump * 0.35; }
         head.rotation.z += pump * 0.09;
         torso.rotation.z += pump * 0.03;
       } else if (z.idleKind === 'ymca') {
@@ -1685,36 +2170,68 @@
           : [3.0, -3.0];
         armL.rotation.z = set[0] + bop;
         armR.rotation.z = set[1] - bop;
+        if (model.elbowL) { model.elbowL.rotation.z = -0.5 - bop * 0.4; model.elbowR.rotation.z = -0.5 + bop * 0.4; }
         head.rotation.z += bop * 0.7;
         group.position.y += Math.abs(Math.sin(z.idleT * 5)) * PX(2.2);
       }
     } else if (state === 'walk') {
       const ph = z.walkPhase;
-      const s1 = Math.sin(ph);
-      const legSw = s1 * gg.step;
-      legL.rotation.z = legSw; legR.rotation.z = -legSw;
-      legL.rotation.x = Math.cos(ph) * 0.10; legR.rotation.x = -Math.cos(ph) * 0.10;
-      torso.rotation.z = hunch + s1 * gg.sway;
-      torso.position.x = hipSetback;
+      const s1 = Math.sin(ph), c1 = Math.cos(ph);
+      const kn = gg.knee === undefined ? 0.55 : gg.knee;
+      legL.rotation.z = s1 * gg.step; legR.rotation.z = -s1 * gg.step;
+      if (model.kneeL) {
+        // the knee bends through the AIRBORNE half of each leg's own cycle:
+        // legL swings forward while cos(ph) < 0, and that is when its heel has
+        // to come up. Both knees keep a permanent slight bend — a zombie that
+        // locks its knees marches like a soldier, which is the wrong read.
+        const kbL = Math.max(0, -c1), kbR = Math.max(0, c1);
+        model.kneeL.rotation.z = 0.14 + kbL * kn * 1.5;
+        model.kneeR.rotation.z = 0.14 + kbR * kn * 1.5;
+        model.footL.rotation.z = 0.30 * kbL - 0.32 * Math.max(0, c1);   // toe-off / heel-strike
+        model.footR.rotation.z = 0.30 * kbR - 0.32 * Math.max(0, -c1);
+      }
       armL.rotation.z = gg.base + Math.sin(ph + Math.PI) * gg.arm;
       armR.rotation.z = (gg.baseB || gg.base) + Math.sin(ph) * gg.arm * 0.75;
+      /* arms SPLAY away from the torso. Without it both forearms converge in
+         front of the chest and, from the 3/4 game camera, tangle into one
+         blob — the silhouette has to keep two arms readable. */
+      const splay = 0.20 + 0.05 * Math.sin(ph);
+      armL.rotation.x = -splay; armR.rotation.x = splay;
+      if (model.elbowL) {
+        const eL = 0.24 + 0.40 * Math.max(0, Math.sin(ph + Math.PI * 1.5));
+        const eR = 0.20 + 0.36 * Math.max(0, Math.sin(ph + Math.PI * 0.5));
+        model.elbowL.rotation.z = -eL; model.elbowR.rotation.z = -eR;
+      }
+      torso.rotation.z = hunch + s1 * gg.sway;
+      torso.position.x = hipSetback;
+      torso.rotation.y = -s1 * 0.14;                // shoulders counter the hips
       head.rotation.z = Math.sin(ph * 2 + 0.5) * 0.055;
-      group.position.y = Math.abs(s1) * PX(gg.bob);
-      head.rotation.y = Math.sin(ph) * 0.07;
+      head.rotation.y = Math.sin(ph + 0.7) * 0.10;  // the head LAGS the shoulders
+      head.rotation.x = Math.sin(ph * 2 + 1.9) * 0.05;
+      group.position.y = plant(Math.abs(s1) * PX(gg.bob * 0.30));
     } else if (state === 'kneel') {
-      legL.rotation.z = 1.15; legR.rotation.z = 1.35;
-      legL.rotation.x = 0.5; legR.rotation.x = 0.55;
-      group.position.y = -PX(24);
+      legL.rotation.z = 0.95; legR.rotation.z = 1.15;
+      if (model.kneeL) {
+        model.kneeL.rotation.z = 1.35; model.kneeR.rotation.z = 1.50;
+        model.footL.rotation.z = -0.55; model.footR.rotation.z = -0.60;
+      }
       torso.rotation.z = hunch + 0.42;
       torso.position.x = hipSetback;
       armL.rotation.z = -0.35; armR.rotation.z = -0.55;
+      if (model.elbowL) { model.elbowL.rotation.z = -0.55; model.elbowR.rotation.z = -0.65; }
       head.rotation.z = -0.30;
       head.rotation.x = 0.25;
+      group.position.y = plant();
     } else if (state === 'die') {
       const k = clamp01(z.dieT / 0.7);
       group.rotation.z = -k * 1.45;                 // tip backwards, away from -x
       group.position.y = -PX(4) * k;
       legL.rotation.z = 0.4 * k; legR.rotation.z = -0.3 * k;
+      if (model.kneeL) {
+        model.kneeL.rotation.z = 0.9 * k; model.kneeR.rotation.z = 0.5 * k;
+        model.footL.rotation.z = -0.3 * k; model.footR.rotation.z = -0.2 * k;
+        model.elbowL.rotation.z = -0.4 * k; model.elbowR.rotation.z = -0.3 * k;
+      }
       armL.rotation.z = -1.4 * k; armR.rotation.z = -1.2 * k;
       head.rotation.z = -0.5 * k;
       opacity = z.dieT > 1.1 ? Math.max(0, 1 - (z.dieT - 1.1) / 0.5) : 1;
@@ -1726,7 +2243,15 @@
       torso.rotation.z = hunch * 0.35;
       torso.position.x = hipSetback;
       armL.rotation.z = 0.5 + Math.sin(time * 5.1) * 0.3; armR.rotation.z = -0.4 - Math.sin(time * 4.6) * 0.3;
+      if (model.elbowL) {
+        model.elbowL.rotation.z = -0.5 - Math.sin(time * 5.1) * 0.25;
+        model.elbowR.rotation.z = -0.5 - Math.sin(time * 4.6) * 0.25;
+      }
       legL.rotation.z = 0.3 + kick; legR.rotation.z = -0.25 - kick * 0.7;
+      if (model.kneeL) {
+        model.kneeL.rotation.z = 0.5 + kick * 0.6; model.kneeR.rotation.z = 0.45 - kick * 0.5;
+        model.footL.rotation.z = -0.25; model.footR.rotation.z = -0.2;
+      }
       legL.rotation.x = 0.2; legR.rotation.x = -0.14;
       head.rotation.z = sw * 0.8;
     } else if (state === 'glorydie') {
@@ -1746,6 +2271,7 @@
     // hit flash
     const hf = z.hitFlash;
     for (const m of mats) {
+      if (!m.emissive) continue;
       if (hf > 0) { m.emissive.setRGB(0.8 * hf, 0.05 * hf, 0.05 * hf); }
       else m.emissive.setRGB(0, 0, 0);
     }
@@ -2045,10 +2571,21 @@
     // the miniature factor for each actor at its own depth
     const aH = apS(heli.z), HOOK = HELI_HOOK_PX * aH, ROPE = HELI_ROPE_PX * aH;
     heli.y *= aH;
-    // he rides the rope's depth until he is released, then falls where he was
-    // let go — so his own miniature factor is that of whichever depth he is at
-    const donZf = dropK <= 0 ? heli.z : HELI_REL[3];
-    const aD = apS(donZf);
+    /* HIS DEPTH, HIS SIZE. He stands on his OWN square (z 0) until the rope
+       takes him — sharing the chopper's approach depth (z +90) is what shrank
+       him to half size through the whole ramble, then popped him back to full
+       the instant the hook caught. The PICKUP SHRINK is the deliberate staging
+       instead: full size through the words, then COLLAPSED to half on the
+       floor (d.pickK — the thought happens at that size), so the chopper
+       lifts a half-size man. The inK term below is the same ease kept for
+       states that never collapsed; max() means once small, always small. */
+    const onRope = hk >= 1;
+    const donZf = dropK <= 0 ? (onRope ? heli.z : 0) : HELI_REL[3];
+    const PICK_S = 0.5;
+    const pickK = Math.max(d.pickK || 0, ease(c01((inK - 0.55) / 0.45)));
+
+    const depthOwn = farK(donZf);
+    const aD = apS(donZf) * (1 - (1 - PICK_S) * pickK * (1 - depthOwn));
     const CHEST = DON_CHEST_PX * aD;
     /* THE PIVOT IS THE HARNESS — the point the rope actually holds: a chest up
        his body while he is upright, the centre of it once he is horizontal.
@@ -2071,7 +2608,6 @@
        point the rope holds — and the renderers hang the body one chest-height
        under it. That keeps his feet on the lawn when he is standing AND when
        the fall has finished, with no second set of numbers to keep in sync. */
-    const onRope = hk >= 1;
     const don = dropK <= 0
       ? (onRope
         ? {
@@ -2080,8 +2616,8 @@
         }
         : {
           col: 0, z: 0, hangK, hanging: false, flying: false,
-          y: DON_CHEST_PX,
-        })
+          y: CHEST,   // scaled chest height — his feet stay on the lawn while
+        })            // the pickup shrink eases him down before the rope lands
       : {
         col: HELI_REL[1] * (1 - dropK),
         y: CHEST + (relY - CHEST) * (1 - dropK * dropK),
@@ -2125,8 +2661,53 @@
     }));
     glow.rotation.x = -Math.PI / 2; glow.position.y = 0.09; glow.scale.setScalar(PX(150));
     R3.scene.add(glow);
+    /* THE DIZZY HALO: six cartoon stars + one soft glow orbiting his head.
+       Camera-facing sprites parented to his BODY group (feet at the origin),
+       so the orbit rides every sway and roll the rig takes and shrinks with
+       his staging. donFallSync drives it per-frame; G.DONDIZZY owns the orbit
+       math, so the 2D painter and this rig agree star for star. */
+    const halo = new T.Group();
+    halo.visible = false;
+    const starCv = document.createElement('canvas'); starCv.width = 64; starCv.height = 64;
+    {
+      const c = starCv.getContext('2d');
+      c.translate(32, 32);
+      c.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * TAU_ - Math.PI / 2, r = i % 2 ? 13 : 29;
+        const x = Math.cos(a) * r, y = Math.sin(a) * r;
+        if (i) c.lineTo(x, y); else c.moveTo(x, y);
+      }
+      c.closePath();
+      c.fillStyle = '#ffd23f'; c.fill();
+      c.lineWidth = 3; c.lineJoin = 'round'; c.strokeStyle = '#7c4c06'; c.stroke();
+      c.fillStyle = '#fff3b8'; c.beginPath(); c.arc(0, 0, 8, 0, TAU_); c.fill();
+    }
+    const glowCv = document.createElement('canvas'); glowCv.width = 64; glowCv.height = 64;
+    {
+      const c = glowCv.getContext('2d');
+      const gr = c.createRadialGradient(32, 32, 2, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(255,214,90,0.55)');
+      gr.addColorStop(1, 'rgba(255,214,90,0)');
+      c.fillStyle = gr; c.fillRect(0, 0, 64, 64);
+    }
+    const haloGlow = new T.Sprite(new T.SpriteMaterial({
+      map: new T.CanvasTexture(glowCv), transparent: true, opacity: 0, depthWrite: false,
+    }));
+    haloGlow.position.set(0, PX(196), 0);
+    haloGlow.scale.setScalar(PX(130));
+    halo.add(haloGlow);
+    const haloStars = [];
+    for (let i = 0; i < 6; i++) {
+      const tex = new T.CanvasTexture(starCv);
+      tex.encoding = T.sRGBEncoding;
+      const sp = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false }));
+      haloStars.push(sp); halo.add(sp);
+    }
+    m.group.add(halo);          // feet-anchored: rides every sway and roll
     const rr = (a, b) => a + Math.random() * (b - a);
-    const F = { m, rig, blob, heli, rope, light, glow, fx: [], yaw: Math.PI, boom: false, washT: 0, roll: 0, flwK: 0 };
+    const F = { m, rig, blob, heli, rope, light, glow, fx: [], yaw: Math.PI, boom: false, washT: 0, roll: 0, flwK: 0,
+      halo, haloStars, haloGlow, faceTex: m.faceTex, blinkOn: false };
     /* fire and smoke, thrown off the airframe when it goes in — 3D-only FX
        (the lawn dust and debris ride the shared 2D particle pass instead, so
        they look the same in both render paths) */
@@ -2162,6 +2743,63 @@
     if (!F) return;
     const wp = worldPos(d.u, d.row, 0);
     const px2w = PX;                       // sprite px → world units, same K
+    /* THE DIZZY STATE — shared by both exits. From the beat he drops until
+       the chopper takes him (or the ground opens) he sways on his feet, his
+       head shakes in erratic gusts, he blinks in one long exaggerated shut
+       every few seconds, and the wobbly halo of stars turns over his head. */
+    const dizK = G.DONDIZZY ? G.DONDIZZY.amount(d) : 0;
+    const dizzyBits = () => {
+      if (dizK <= 0.02 || !F.m.head) {
+        if (F.halo) F.halo.visible = false;
+        if (F.faceTex && F.blinkOn) {          // faded out mid-blink: reopen
+          F.blinkOn = false;
+          drawBossFace(F.faceTex.image.getContext('2d'), 256, 288, 0);
+          F.faceTex.needsUpdate = true;
+        }
+        return;
+      }
+      // the head: fast little shakes in GUSTS, on top of the pose's own tilt
+      F.m.head.rotation.y += G.DONDIZZY.head(time) * 0.34 * dizK;
+      F.m.head.rotation.z += G.DONDIZZY.head(time * 0.63 + 4.2) * 0.14 * dizK;
+      // the blink: repaint the decal only on the open/shut flip
+      if (F.faceTex) {
+        const shut = G.DONDIZZY.blink(time) > 0.5;
+        if (!!F.blinkOn !== shut) {
+          F.blinkOn = shut;
+          drawBossFace(F.faceTex.image.getContext('2d'), 256, 288, shut ? 1 : 0);
+          F.faceTex.needsUpdate = true;
+        }
+      }
+      // the halo: a wobbling, tilted ellipse of stars circling ABOVE his
+      // crown. The model's group is yawed (the boss presents his -x face),
+      // which would turn the orbit edge-on and swallow the stars in the
+      // skull — so the halo counters the yaw and adds its own drift. The
+      // centre sits at the CROWN (S · 252px, measured: S·PX(170) is the head
+      // CENTRE and put the stars through his face), everything scaled by the
+      // model's normalisation factor.
+      const HSC = F.m.innerS || 1;
+      if (F.halo) {
+        F.halo.visible = F.rig.visible;
+        F.halo.rotation.y = -(F.m.group.rotation.y || 0) + Math.sin(time * 0.9) * 0.4;
+        F.halo.rotation.z = Math.sin(time * 1.31) * 0.16;
+        F.halo.rotation.x = Math.sin(time * 0.77 + 1.4) * 0.12;
+        F.haloGlow.material.opacity = 0.5 * dizK * (0.8 + 0.2 * Math.sin(time * 3.7));
+        F.haloGlow.position.set(0, PX(196) * HSC, 0);
+        F.haloGlow.scale.setScalar(PX(120) * HSC);
+        for (let i = 0; i < F.haloStars.length; i++) {
+          const sp = F.haloStars[i];
+          const st = G.DONDIZZY.star(i, F.haloStars.length, time);
+          sp.position.set(PX(st.x) * HSC,
+            PX(252) * HSC + st.y * PX(0.9) * HSC + Math.sin(time * 3.3 + i * 1.7) * PX(5) * HSC,
+            (PX(st.y) * 1.35 + PX(9)) * HSC);
+          const pu = 0.8 + 0.25 * Math.sin(time * 5 + i * 2.4);
+          const w = PX(24) * pu * HSC * (0.65 + 0.5 * dizK);
+          sp.scale.set(w, w, 1);
+          sp.material.rotation = st.th * 1.6 + time * 3.1 + i;
+          sp.material.opacity = 0.35 + 0.65 * dizK;
+        }
+      }
+    };
     /* ---------------- THE SWALLOW (final boss) ----------------
        No chopper: the lawn opens under him and takes him. The plane of the
        lawn is OPAQUE, so sinking the rig below y=0 does the clipping for us
@@ -2178,44 +2816,56 @@
         shieldWobble: 0, angry: false, isBoss: true, lean: 0, shakeAmp: 0.34,
       }, time);
       F.m.group.position.set(0, 0, 0);
-      F.rig.rotation.set(0, 0, 0);
-      F.rig.position.set(wp.x, -PX(sinkK * 292), wp.z);
+      // DIZZY: he sways on his feet right up until the lawn has him
+      F.rig.rotation.set(0, 0, G.DONDIZZY.sway(time) * 0.07 * dizK);
+      F.rig.position.set(
+        wp.x + G.DONDIZZY.sway(time * 0.77 + 1.2) * PX(8) * dizK,
+        -PX(sinkK * 292), wp.z);
       F.rig.visible = true;
       F.blob.position.set(wp.x, 0.05, wp.z);
       F.blob.scale.setScalar(PX(55 * (1 - sinkK * 0.9)) + 0.01);
       F.blob.material.opacity = 0.5 * (1 - sinkK);
       F.heli.visible = false; F.rope.visible = false;
-      // the firelight on the grass: it flickers with the burps
+      // the firelight on the grass: it flickers with the burps, and burns
+      // brighter the more furious the temper (game.js rolls the moods)
       const rk = d.ringK || 0;
       const flick = d.spew ? 1 : 0;
+      const fury = d.furyK || 0;
       F.light.position.set(wp.x, PX(20), wp.z);
       // a FIRELIGHT, not a floodlight: the wreck's own lamp runs at ~1.9 and
       // thirty washed the entire lawn yellow
-      F.light.intensity = flick * (2.1 + Math.sin(time * 23) * 0.7 + Math.sin(time * 7.3) * 0.4);
+      F.light.intensity = flick * (1.5 + 1.5 * fury + Math.sin(time * 23) * 0.7 + Math.sin(time * 7.3) * 0.4);
       F.glow.position.set(wp.x, 0.09, wp.z);
       F.glow.scale.setScalar(PX(130) * (0.35 + rk * 0.65));
-      F.glow.material.opacity = flick * (0.30 + Math.sin(time * 17) * 0.09) * (0.5 + rk * 0.5);
+      F.glow.material.opacity = flick * (0.22 + 0.12 * fury + Math.sin(time * 17) * 0.09) * (0.5 + rk * 0.5);
       for (const p of F.fx) { p.t += dt; p.m.position.x += p.vx * dt; p.m.position.z += p.vz * dt;
         p.m.position.y += (p.vy + (p.g || 0) * p.t) * dt;
         const k = p.t / p.life; if (k >= 1) { p.dead = true; continue; }
         p.m.material.opacity = 0.95 * (1 - k * k); p.m.scale.setScalar(p.r * (1 - k * 0.5)); }
       F.fx = F.fx.filter(p => !p.dead);
+      dizzyBits();
       return;
     }
     const P = heliPath(d);
     const donDown = d.phase === 'fall' && (d.dropK || 0) >= 1;
+    /* THE COLLAPSE (the first Don): from the moment the words run out he is
+       a FLAT man. The die pose owns him on the turf — through the thought,
+       and while the rope pays out — until the harness finally lifts him. */
+    const flatK = !donDown && !P.airborne ? (d.colK || 0) : 0;
 
     /* ---------------- the Don ---------------- */
     poseZombie(F.m, {
       id: -999, u: d.u + P.don.col, row: d.row, type: d.type, seed: d.seed, spec: F.m.spec,
-      state: donDown ? 'die' : P.airborne ? 'hang' : 'hold',
+      state: donDown ? 'die' : P.airborne ? 'hang' : (flatK > 0.02 ? 'die' : 'hold'),
       // dieT ramps over the `landK` beat: the fall is horizontal, so the flop
-      // onto his back has to be SEEN rather than snapped to
-      dieT: donDown ? 0.9 * (d.landK === undefined ? 1 : d.landK) : 0, walkPhase: 0, spawnT: 1,
+      // onto his back has to be SEEN rather than snapped to — and over colK
+      // for the collapse, which is the same fold taken slowly
+      dieT: donDown ? 0.9 * (d.landK === undefined ? 1 : d.landK) : 0.9 * clamp01(flatK), walkPhase: 0, spawnT: 1,
       magaOn: !!d.magaOn, toupeeOn: !!d.toupeeOn,
       helmet: false, shield: false, hitFlash: 0, helmetWobble: 0,
       shieldWobble: 0, angry: false, isBoss: true,
-      lean: d.phase !== 'fall' ? Math.sin(time * 1.9) * 0.16 : 0,
+      lean: (d.phase !== 'fall' ? Math.sin(time * 1.9) * 0.16 : 0) * (1 - dizK * 0.5)
+        + G.DONDIZZY.sway(time) * 0.2 * dizK,
       shakeAmp: 0.28,
     }, time);
     const donG = F.m.group;
@@ -2237,9 +2887,16 @@
     if (P.don.flying) {
       F.rig.position.x += Math.sin((d.dropK || 0) * 11) * PX(8);   // a body in the air
     }
+    // DIZZY: a slow erratic drift on his feet while he still owns them — a
+    // flat man does not drift, the pose already owns him
+    if (dizK > 0.02 && !P.airborne && !flatK) {
+      F.rig.position.x += G.DONDIZZY.sway(time * 0.77 + 1.2) * PX(8) * dizK;
+      F.rig.position.y += Math.sin(time * 1.47) * PX(3.5) * dizK;
+    }
     const wantRoll = donDown ? 0
       : hangK * 1.5
-      + (P.don.flying ? (d.dropK || 0) * 6.6 : Math.sin(time * 1.5) * 0.05);
+      + (P.don.flying ? (d.dropK || 0) * 6.6 : Math.sin(time * 1.5) * 0.05)
+      + G.DONDIZZY.sway(time * 1.13 + 2.4) * 0.05 * dizK;
     F.roll = F.roll + (wantRoll - F.roll) * Math.min(1, dt * 8);
     F.rig.rotation.set(0, 0, F.roll);
     // the far staging is played as a MINIATURE: the wrapper carries the scale,
@@ -2252,6 +2909,8 @@
     F.blob.position.set(worldPos(d.u + P.don.col, d.row, 0).x, 0.05, wp.z + P.don.z * 0.5);
     F.blob.scale.setScalar(PX(55 * P.apD * (P.don.flying ? 0.45 + shadowK * 0.75 : 1)) + 0.01);
     F.blob.material.opacity = 0.55 * (P.don.flying ? 0.25 + shadowK * 0.75 : 1);
+
+    dizzyBits();
 
     /* ---------------- the chopper ---------------- */
     const hp = new T.Vector3(
@@ -2484,15 +3143,37 @@
     // streaks (length reads better than darkness for "subtle but present"),
     // high enough to stay tame on the board.
     // VERY subtle (~18% dip in the cast core — half of what it was).
-    const hemi = new T.HemisphereLight(0xd8b0d8, 0x5f7a48, 1.15);
+    /* THREE-POINT RIG. The old build leaned on a 1.15 hemisphere light with a
+       0.18 key: the camera-facing side of every actor received AMBIENT ONLY,
+       which is exactly why the cast read flat, pale and unstuck from the lawn.
+       The rig is now: a cool ambient dome (0.46), a warm FRONT key from the
+       camera's side (0.78) that models the faces we actually look at, and the
+       low sunset backlight (1.05) that rims the tops and casts the long
+       toward-camera shadows. Total luminance is held near the old level so the
+     dusk mood and the 2D overlay art still agree. With colour management on,
+     unity irradiance on a camera-facing surface is the target, so the numbers
+     are small by design: hemi 0.22 + fill 0.57 + rim 0.26 ≈ 1.0. */
+    const hemi = new T.HemisphereLight(0xe6eeff, 0x6f7a52, 0.22);
     R3.scene.add(hemi);
-    const sun = new T.DirectionalLight(0xffb87a, 0.18);
+    R3.hemi = hemi;
+    const fill = new T.DirectionalLight(0xfff2e0, 0.57);
+    fill.position.set(-90, 120, 260);
+    R3.scene.add(fill);
+    R3.fill = fill;
+    const rimL = new T.DirectionalLight(0xffe8c8, 0.26);
+    rimL.position.set(150, 60, 120);
+    R3.scene.add(rimL);
+    R3.rimLight = rimL;
+    const sun = new T.DirectionalLight(0xffc48a, 0.92);
     sun.position.set(-14, 143, -235);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -120; sun.shadow.camera.right = 120;
-    sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120;
-    sun.shadow.camera.near = 20; sun.shadow.camera.far = 700;
+    /* The board is 100 wu wide and the fence line runs past it, so a ±120 box
+       left the outer half of the scene with NO shadow at all — the critic read
+       that as "the fence casts no shadow". */
+    sun.shadow.camera.left = -175; sun.shadow.camera.right = 175;
+    sun.shadow.camera.top = 150; sun.shadow.camera.bottom = -150;
+    sun.shadow.camera.near = 20; sun.shadow.camera.far = 900;
     sun.shadow.bias = -0.0006;
     sun.shadow.radius = 4;      // PCFSoft + radius: soft, low-contrast edges
     R3.scene.add(sun);

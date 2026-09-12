@@ -206,8 +206,34 @@
     // ---- eyes: narrow and suspicious, but the WHITES have to read, so the
     //      outline is thin and the lid is a single dark line, not a second
     //      ellipse (a stack of outlined ellipses reads as one black bar).
+    //      Each eye sits in a PALE PATCH — a panda mask, but cream on the
+    //      orange — and in the dizzy state the eyes squeeze SHUT in one
+    //      long, exaggerated blink every few seconds.
+    const diz = (z.dizzy || 0);
+    const shut = diz > 0.03 && G.DONDIZZY && G.DONDIZZY.blink(time) > 0.5;
     for (const [ex, ey, sc] of [[-22, -9, 1.0], [-1, -6.5, 0.88]]) {
       const px = cx + ex, py = cy + ey;
+      ctx.save();
+      ctx.globalAlpha = 0.88;
+      ctx.fillStyle = '#f7ead2';
+      ctx.beginPath(); ctx.ellipse(px + 0.5, py + 1.2, 13.5 * sc, 9.5 * sc, -0.08, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = '#c98a4a'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(px + 0.5, py + 1.2, 13.5 * sc, 9.5 * sc, -0.08, 0, TAU); ctx.stroke();
+      ctx.restore();
+      if (shut) {
+        // THE DIZZY BLINK: a heavy shut-lid arc plus the squeeze crease
+        // under it — the whole face briefly done with everything
+        ctx.strokeStyle = OUT; ctx.lineWidth = 3.2 * sc; ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(px - 8.5 * sc, py - 1.5 * sc);
+        ctx.quadraticCurveTo(px, py + 4.5 * sc, px + 8.5 * sc, py - 1 * sc);
+        ctx.stroke();
+        ctx.strokeStyle = '#8a4a1e'; ctx.lineWidth = 1.8 * sc; ctx.globalAlpha = 0.7;
+        ctx.beginPath(); ctx.arc(px, py + 3 * sc, 7 * sc, 0.35, 2.75); ctx.stroke();
+        ctx.globalAlpha = 1;
+        continue;
+      }
       k.e(ctx, px, py, 9 * sc, 5.6 * sc, '#fbf8ee', '#cfc8b4', '#ffffff', OUT, 1.8);
       k.e(ctx, px - 2.4 * sc, py + 0.2, 3 * sc, 3.2 * sc, '#3d2c18', '#20150a', '#6a553a', OUT, 1.2);
       // a highlight in the eye — one dot, and the whole face gains a soul
@@ -594,9 +620,12 @@
 
     // ---- head: no neck. The skull is translated to the neck line and rotated
     //      a little with the body so the jowls never detach from the collar.
+    //      In the dizzy state the head also shakes in ERRATIC GUSTS on top of
+    //      whatever tilt the pose already handed in.
     ctx.save();
     ctx.translate(0, G0.neck);
-    ctx.rotate(A.headTilt * 0.5);
+    const dshake = (z.dizzy && G.DONDIZZY) ? G.DONDIZZY.head(time) * 0.26 * z.dizzy : 0;
+    ctx.rotate(A.headTilt * 0.5 + dshake);
     head(ctx, k, L, z, time);
     ctx.restore();
 

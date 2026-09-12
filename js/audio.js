@@ -199,6 +199,72 @@
       if (big) this.noise(2.0, 0.14, 2200, 0.5, 'highpass');
     }
 
+    /* ---- THE CROWD ----
+       A synthesized stadium: a shushing noise bed that swells and decays in
+       steps (every primitive here can only ramp DOWN, so a swell is stepped
+       up), a chant of detuned "oh" voices with "hey!" stabs on the heads,
+       hand claps scattered off the beat, a whistle or three and the odd
+       rising "woo". Kinds: 'pro' the big prologue cheer, 'up' an uplift
+       swell under the confetti, 'out' the tail that keeps cheering after it
+       ends. Everything is scheduled at call time — nothing ticks later. */
+    crowdCheer(kind) {
+      if (!this.ctx || this.muted) return;
+      const T = this.t;
+      const bed = (at, dur, vol) => {          // the crowd's shush itself
+        this.noise(dur, vol, 950, at, 'bandpass', 0.6);
+        this.noise(dur, vol * 0.45, 340, at, 'lowpass');
+      };
+      const voice = (f, dur, vol, at) => {     // one "oh" — three detuned saws
+        this.osc('sawtooth', f, f * 0.94, dur, vol, at, 'lin');
+        this.osc('sawtooth', f * 1.011, f * 0.952, dur, vol * 0.72, at + 0.015, 'lin');
+        this.osc('sawtooth', f * 0.497, f * 0.47, dur, vol * 0.5, at, 'lin');
+      };
+      const hey = (at, vol) => {               // the stab on each chant head
+        this.osc('sawtooth', 392, 262, 0.16, vol, at, 'lin');
+        this.osc('square', 784, 523, 0.1, vol * 0.35, at + 0.012, 'lin');
+      };
+      const clap = (at, vol) => {              // hands from everywhere
+        this.noise(0.045, vol, 2600, at, 'highpass');
+        this.noise(0.028, vol * 0.5, 1100, at, 'bandpass', 1.4);
+      };
+      const whistle = (at, vol) => {           // two fingers, courtside
+        this.osc('sine', 1750, 2450, 0.34, vol, at);
+        this.osc('sine', 2350, 1900, 0.22, vol * 0.8, at + 0.34);
+      };
+      const woo = (at, vol) => { this.osc('sawtooth', 290, 540, 0.55, vol, at, 'lin'); };
+      if (kind === 'pro') {
+        // swell in (2.7 s), the chant, claps all over the loud part, and a
+        // long warm decay that carries into the first fireworks
+        [0.035, 0.075, 0.125, 0.175, 0.215, 0.245]
+          .forEach((v, i) => bed(T + i * 0.45, 0.52, v));
+        hey(T + 2.7, 0.2); voice(196, 0.78, 0.13, T + 2.72);
+        for (let i = 0; i < 7; i++) {
+          const at = T + 3.55 + i * 0.42;
+          hey(at, 0.15); voice(196 + (i % 2) * 11, 0.8, 0.11, at + 0.02);
+        }
+        let ct = T + 2.85;
+        for (let i = 0; i < 46; i++) { ct += M.rand(0.04, 0.16); clap(ct, M.rand(0.05, 0.16)); }
+        whistle(T + 3.1, 0.055); whistle(T + 4.6, 0.05); whistle(T + 5.9, 0.04);
+        woo(T + 2.9, 0.07); woo(T + 4.4, 0.06); woo(T + 5.6, 0.05);
+        [0.2, 0.155, 0.115, 0.085, 0.06, 0.04, 0.025]
+          .forEach((v, i) => bed(T + 6.45 + i * 0.55, 0.62, v));
+        for (let i = 0; i < 8; i++) clap(T + 6.6 + i * 0.55 + M.rand(0, 0.2), M.rand(0.03, 0.08));
+      } else if (kind === 'up') {
+        // a shorter lift: swell, one "HEY", claps, decay
+        [0.05, 0.1, 0.15, 0.19, 0.22].forEach((v, i) => bed(T + i * 0.4, 0.46, v));
+        hey(T + 1.9, 0.14); voice(220, 0.7, 0.09, T + 1.92); voice(196, 0.7, 0.07, T + 2.12);
+        let ct = T + 0.35;
+        for (let i = 0; i < 18; i++) { ct += M.rand(0.06, 0.19); clap(ct, M.rand(0.04, 0.11)); }
+        whistle(T + 2.35, 0.045); woo(T + 1.2, 0.055);
+        [0.15, 0.105, 0.068, 0.038].forEach((v, i) => bed(T + 2.45 + i * 0.5, 0.56, v));
+      } else {                                 // 'out' — the tail after the rain
+        [0.15, 0.105, 0.068, 0.04, 0.02].forEach((v, i) => bed(T + i * 0.55, 0.62, v));
+        hey(T + 0.3, 0.09); voice(196, 0.8, 0.06, T + 0.35);
+        for (let i = 0; i < 7; i++) clap(T + 0.2 + i * 0.5 + M.rand(0, 0.2), M.rand(0.03, 0.06));
+        whistle(T + 0.9, 0.035);
+      }
+    }
+
     /* ---- ambience driven by game state ---- */
     ambience(dt, walkingZombies, aliveZombies) {
       if (!this.ctx || this.muted) return;

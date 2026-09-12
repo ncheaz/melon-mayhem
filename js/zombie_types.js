@@ -61,8 +61,10 @@
      crowd: no seeded variants, no grime, no wardrobe roll. Orange skin,
      a swooping blonde rug, and (stage 5, the final boss only) a red cap. */
   const BOSS = {
-    skin:  C('#e79a52', '#ad6a2c', '#ffc684', '#84491a'),
-    skinD: C('#d2833d', '#9a5a24', '#f3ae6c', '#753f16'),
+    // skin pushed HOT: a louder, redder orange than the old #e79a52 family —
+    // the caricature reads better the more the tan is exaggerated
+    skin:  C('#f28a38', '#b5621e', '#ffcf92', '#7e3a10'),
+    skinD: C('#e07a28', '#a55518', '#f7b570', '#6e2f0e'),
     hair:  C('#f0d071', '#c19f36', '#fff2ad', '#96791f'),
     suit:  C('#2b3a60', '#16233d', '#42588a', '#0e1730'),
     suitD: C('#1e2a49', '#101a2e', '#33456d', '#0a1122'),
