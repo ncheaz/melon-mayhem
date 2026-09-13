@@ -1,5 +1,7 @@
 # Melon Mayhem 🍈💥
 
+**▶ [PLAY IT NOW — no install, runs in your browser](https://ncheaz.github.io/melon-mayhem/)**
+
 **Garden artillery versus the zombie horde.** A Plants-vs-Zombies-inspired
 tower defense where your melon-pult lobs real-physics projectiles across a
 4×10 garden — true arcs, apex-height skill shots, an armor-shredding economy,
