@@ -10,6 +10,16 @@ glory kills, and a boss called **The Don**.
 Fully playable in the browser. No build step, no external assets — every
 sprite is drawn procedurally and every sound is synthesized in Web Audio.
 
+## Screenshots
+
+| ![](screenshots/gameplay-stage1.png) | ![](screenshots/high-arc-flight.png) |
+|:---:|:---:|
+| *Stage 1 — charge the meter, read the arc, lob* | *High arcs count double — apex is a skill lever* |
+| ![](screenshots/glory-kill.png) | ![](screenshots/boss-the-don.png) |
+| *Glory kill — headshot a bare head, walk up, finish it* | **THE DON** — *high arcs rip the rug, then he folds* |
+| ![](screenshots/campaign-clear.png) | |
+| *Campaign clear — THE END, after The Don's last words* | |
+
 ## Running
 
 Open `index.html` in any modern browser — that's it. (Or serve the folder if
@@ -68,6 +78,7 @@ the cap comes off, the rug comes off, and The Don gets his last words.
 ```
 index.html          entry point (3D by default, ?flat for 2D)
 progress.html       dev status page
+screenshots/        README imagery — captured from the current build
 css/style.css
 js/engine.js        math, input, camera shake, timing, projection
 js/audio.js         fully synthesized sound (Web Audio)
